@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+:root {
+  font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #0F172A;
+  color: #E2E8F0;
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1E293B;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #64748B;
+}
+
+@layer components {
+  .panel {
+    @apply bg-industrial-800 border border-industrial-700 rounded-lg;
+  }
+  .panel-header {
+    @apply px-4 py-3 border-b border-industrial-700 flex items-center justify-between;
+  }
+  .panel-body {
+    @apply p-4;
+  }
+  .status-dot {
+    @apply w-2 h-2 rounded-full inline-block mr-2;
+  }
+  .btn-primary {
+    @apply px-4 py-2 bg-accent-cyan text-white rounded hover:bg-cyan-500 transition-colors font-medium;
+  }
+  .btn-warning {
+    @apply px-4 py-2 bg-accent-orange text-white rounded hover:bg-orange-600 transition-colors font-medium;
+  }
+  .btn-danger {
+    @apply px-4 py-2 bg-accent-red text-white rounded hover:bg-red-600 transition-colors font-medium;
+  }
+  .btn-secondary {
+    @apply px-4 py-2 bg-industrial-700 text-industrial-100 rounded hover:bg-industrial-600 transition-colors font-medium;
+  }
+  .data-value {
+    @apply font-mono text-accent-cyan text-lg font-semibold;
+  }
+  .data-label {
+    @apply text-industrial-400 text-sm;
+  }
+}

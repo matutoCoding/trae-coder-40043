@@ -3,9 +3,11 @@ export type FixtureStatus = 'released' | 'clamping' | 'clamped' | 'error';
 export type SensorStatus = 'normal' | 'warning' | 'error';
 export type WeldPointStatus = 'pending' | 'welding' | 'completed' | 'defective' | 'repaired';
 export type UltrasonicResult = 'pass' | 'fail' | 'pending';
-export type DefectType = 'none' | 'cold' | 'missing' | 'spatter';
+export type DefectType = 'none' | 'cold' | 'missing' | 'spatter' | 'param_abnormal';
 export type MaintenanceType = 'electrode_dressing' | 'preventive' | 'corrective';
-export type ProcessModule = 'loading' | 'fixture' | 'welding' | 'inspection' | 'repair' | 'cycle' | 'maintenance';
+export type ProcessModule = 'loading' | 'fixture' | 'welding' | 'inspection' | 'repair' | 'cycle' | 'maintenance' | 'traceability';
+export type AlarmSeverity = 'info' | 'warning' | 'error' | 'high' | 'low';
+export type ProcessPhase = 'loading' | 'fixture' | 'welding' | 'inspection' | 'repair' | 'maintenance' | 'cycle' | 'quality';
 
 export interface Position3D {
   x: number;
@@ -18,6 +20,18 @@ export interface Position2D {
   y: number;
 }
 
+export interface ParamRange {
+  min: number;
+  max: number;
+}
+
+export interface WeldingParamRanges {
+  current: ParamRange;
+  voltage: ParamRange;
+  pressure: ParamRange;
+  time: ParamRange;
+}
+
 export interface Workpiece {
   id: string;
   code: string;
@@ -26,6 +40,7 @@ export interface Workpiece {
   loadingTime: Date;
   status: WorkpieceStatus;
   position: Position3D;
+  operator?: string;
 }
 
 export interface SensorData {
@@ -44,6 +59,8 @@ export interface Fixture {
   status: FixtureStatus;
   clampForce: number;
   positionAccuracy: number;
+  operator?: string;
+  clampTime?: Date;
   sensors: SensorData[];
 }
 
@@ -52,8 +69,9 @@ export interface WeldingParams {
   voltage: number;
   pressure: number;
   time: number;
-  programId: string;
-  programName: string;
+  programId?: string;
+  programName?: string;
+  pointCount?: number;
 }
 
 export interface WeldingProgram {
@@ -62,6 +80,8 @@ export interface WeldingProgram {
   description: string;
   defaultParams: WeldingParams;
   pointCount: number;
+  paramRanges: WeldingParamRanges;
+  savedAt?: Date;
 }
 
 export interface WeldPoint {
@@ -71,6 +91,19 @@ export interface WeldPoint {
   status: WeldPointStatus;
   ultrasonicResult?: UltrasonicResult;
   defectType?: DefectType;
+  weldParams?: WeldingParams;
+  paramAbnormal?: {
+    param: 'current' | 'voltage' | 'pressure' | 'time';
+    value: number;
+    expectedMin: number;
+    expectedMax: number;
+    min: number;
+    max: number;
+  };
+  weldingStartTime?: Date;
+  weldingEndTime?: Date;
+  inspector?: string;
+  inspectionTime?: Date;
 }
 
 export interface RepairRecord {
@@ -82,6 +115,7 @@ export interface RepairRecord {
   repairTime: Date;
   description: string;
   spatterCleaned: boolean;
+  repairMethod?: 'manual' | 'rework' | 'replace';
 }
 
 export interface CycleData {
@@ -109,10 +143,50 @@ export interface MaintenanceRecord {
   description: string;
   nextMaintenanceDate: Date;
   equipmentHealth: number;
+  relatedWorkpieceId?: string;
 }
 
 export interface WeldingHistoryPoint {
   time: string;
   current: number;
   voltage: number;
+  currentNormal: boolean;
+  voltageNormal: boolean;
+}
+
+export interface AlarmRecord {
+  id: string;
+  time: Date;
+  severity: AlarmSeverity;
+  source: ProcessPhase;
+  workpieceId?: string;
+  weldPointIndex?: number;
+  title: string;
+  description: string;
+  paramName?: string;
+  paramValue?: number;
+  paramMin?: number;
+  paramMax?: number;
+  resolved: boolean;
+  resolvedBy?: string;
+  resolvedAt?: Date;
+  resolution?: string;
+  createdBy?: string;
+}
+
+export interface TraceEvent {
+  id: string;
+  phase: ProcessPhase;
+  time: Date;
+  timestamp?: Date;
+  operator?: string;
+  workpieceId: string;
+  weldPointIndex?: number;
+  title: string;
+  description: string;
+  data?: Record<string, any>;
+  detail?: Record<string, any>;
+  status?: string;
+  abnormal?: boolean;
+  duration?: number;
 }

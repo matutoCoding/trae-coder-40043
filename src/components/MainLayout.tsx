@@ -1,7 +1,7 @@
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Package, Clipboard, Bot, ScanLine,
-  Wrench, Timer, Settings, Bell, User, ChevronRight
+  Wrench, Timer, Settings, Bell, User, ChevronRight, History
 } from 'lucide-react';
 import { useWeldingStore } from '@/store/weldingStore';
 import type { ProcessModule } from '@/types';
@@ -20,6 +20,7 @@ const navItems: NavItem[] = [
   { path: '/welding', module: 'welding', label: '机器人焊接', icon: Bot },
   { path: '/inspection', module: 'inspection', label: '焊点检测', icon: ScanLine },
   { path: '/repair', module: 'repair', label: '补焊修整', icon: Wrench },
+  { path: '/traceability', module: 'traceability', label: '生产追溯', icon: History },
   { path: '/cycle', module: 'cycle', label: '节拍监控', icon: Timer },
   { path: '/maintenance', module: 'maintenance', label: '设备维护', icon: Settings },
 ];
@@ -87,6 +88,8 @@ function Sidebar() {
 function Header() {
   const dashboardStats = useWeldingStore((s) => s.dashboardStats);
   const currentWorkpiece = useWeldingStore((s) => s.currentWorkpiece);
+  const alarmRecords = useWeldingStore((s) => s.alarmRecords);
+  const activeAlarmCount = alarmRecords.filter(a => !a.resolved).length;
 
   return (
     <header className="h-16 bg-industrial-900 border-b border-industrial-700 flex items-center px-6 justify-between">
@@ -100,12 +103,19 @@ function Header() {
             今日产量：<span className="text-accent-green font-mono">{dashboardStats.todayOutput}</span>
             <span className="text-industrial-500">/{dashboardStats.targetOutput}</span>
           </span>
+          <span className="text-xs text-industrial-400">
+            合格率：<span className="text-accent-cyan font-mono">{dashboardStats.passRate}%</span>
+          </span>
         </div>
       </div>
       <div className="flex items-center gap-4">
         <button className="relative p-2 rounded-md text-industrial-300 hover:bg-industrial-800 hover:text-white transition-colors">
           <Bell className="w-5 h-5" />
-          <span className="absolute top-1 right-1 w-2 h-2 bg-accent-red rounded-full" />
+          {activeAlarmCount > 0 && (
+            <span className="absolute top-0.5 right-0.5 min-w-[18px] h-[18px] px-1 bg-accent-red rounded-full text-[10px] font-bold text-white flex items-center justify-center">
+              {activeAlarmCount}
+            </span>
+          )}
         </button>
         <div className="h-8 w-px bg-industrial-700" />
         <div className="flex items-center gap-2">

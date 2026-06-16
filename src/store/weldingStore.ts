@@ -5,7 +5,7 @@ import type {
   WeldingHistoryPoint, AlarmRecord, TraceEvent, WeldingParamRanges,
   DefectType, DisposalRecord, AlarmStatus, RepairReason, RepairMethod,
   ReinspectionResult, WorkpieceComparison, DashboardDisposalStats,
-  ProcessPhase,
+  ProcessPhase, QualityBoardStats,
 } from '@/types';
 import {
   mockWorkpieces, mockFixture, mockWeldPoints, mockRepairRecords,

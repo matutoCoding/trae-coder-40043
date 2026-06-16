@@ -93,65 +93,95 @@ export const mockWeldingPrograms: WeldingProgram[] = [
   },
 ];
 
-function generateWeldPoints(count: number, programId: string = 'prog-001'): WeldPoint[] {
+function generateWeldPoints(
+  workpieceId: string,
+  count: number,
+  programId: string,
+  defectiveIdx: number[] = [],
+  statusPattern: 'all_done' | 'partial' | 'none' = 'all_done'
+): WeldPoint[] {
   const program = mockWeldingPrograms.find(p => p.id === programId) || mockWeldingPrograms[0];
   const points: WeldPoint[] = [];
-  const rows = Math.ceil(count / 8);
+  const cols = Math.ceil(count / 6);
 
   for (let i = 0; i < count; i++) {
-    const row = Math.floor(i / 8);
-    const col = i % 8;
+    const row = Math.floor(i / cols);
+    const col = i % cols;
     const base = program.defaultParams;
-    let status: WeldPoint['status'] = i < 30 ? 'completed' : i < 35 ? 'welding' : 'pending';
+    let status: WeldPoint['status'] = 'pending';
+    if (statusPattern === 'all_done') status = i < count ? 'completed' : 'pending';
+    else if (statusPattern === 'partial') status = i < Math.floor(count * 0.6) ? 'completed' : i < Math.floor(count * 0.65) ? 'welding' : 'pending';
+
     let defectType: WeldPoint['defectType'] = 'none';
     let ultrasonicResult: WeldPoint['ultrasonicResult'] = undefined;
     let paramAbnormal = undefined;
 
-    if (i < 30) {
-      if (i === 28) {
+    if (status === 'completed' || defectiveIdx.includes(i)) {
+      if (defectiveIdx.includes(i)) {
         status = 'defective';
-        defectType = 'cold';
         ultrasonicResult = 'fail';
-      } else if (i === 18) {
-        defectType = 'param_abnormal';
-        ultrasonicResult = 'fail';
-        status = 'defective';
-        paramAbnormal = {
-          param: 'current' as const,
-          value: 9800,
-          expectedMin: program.paramRanges.current.min,
-          expectedMax: program.paramRanges.current.max,
-          min: program.paramRanges.current.min,
-          max: program.paramRanges.current.max,
-        };
+        if (i === 18 || (i === 0 && defectiveIdx.length > 0)) {
+          defectType = 'param_abnormal';
+          paramAbnormal = {
+            param: 'current' as const,
+            value: 9780 + i * 5,
+            expectedMin: program.paramRanges.current.min,
+            expectedMax: program.paramRanges.current.max,
+            min: program.paramRanges.current.min,
+            max: program.paramRanges.current.max,
+          };
+        } else {
+          defectType = 'cold';
+        }
       } else {
         ultrasonicResult = 'pass';
       }
     }
 
+    const wpSuffix = workpieceId.replace('wp-', '');
     points.push({
-      id: `pt-${i + 1}`,
+      id: `pt-${wpSuffix}-${String(i + 1).padStart(2, '0')}`,
       index: i + 1,
-      position: { x: col * 12 + 10, y: row * 12 + 10 },
+      workpieceId,
+      position: { x: col * 14 + 10, y: row * 14 + 10 },
       status,
       ultrasonicResult,
       defectType,
       weldParams: {
         ...base,
-        current: i === 18 ? 9800 : base.current + (Math.random() * 500 - 250),
+        current: defectiveIdx.includes(i) && defectType === 'param_abnormal'
+          ? paramAbnormal!.value
+          : base.current + (Math.random() * 500 - 250),
         voltage: base.voltage + (Math.random() * 0.2 - 0.1),
       },
       paramAbnormal,
       weldingStartTime: new Date(now.getTime() - 1000 * (count - i) * 2),
-      weldingEndTime: i < 30 ? new Date(now.getTime() - 1000 * (count - i) * 2 - 400) : undefined,
-      inspector: i < 28 || i === 29 ? '王质检员' : undefined,
-      inspectionTime: i < 28 || i === 29 ? new Date(now.getTime() - 1000 * 60 * 15) : i === 28 || i === 18 ? new Date(now.getTime() - 1000 * 60 * 10) : undefined,
+      weldingEndTime: status === 'completed' || status === 'defective'
+        ? new Date(now.getTime() - 1000 * (count - i) * 2 - 400)
+        : undefined,
+      inspector: (status === 'completed' || status === 'defective') ? '王质检员' : undefined,
+      inspectionTime: status === 'completed' || status === 'defective'
+        ? new Date(now.getTime() - 1000 * 60 * (defectiveIdx.includes(i) ? 10 : 15))
+        : undefined,
     });
   }
   return points;
 }
 
-export const mockWeldPoints: WeldPoint[] = generateWeldPoints(48);
+const wp1Points = generateWeldPoints('wp-001', 48, 'prog-001', [18, 27], 'all_done');
+const wp2Points = generateWeldPoints('wp-002', 52, 'prog-002', [22], 'partial');
+const wp3Points = generateWeldPoints('wp-003', 36, 'prog-003', [], 'none');
+
+wp1Points[18] = { ...wp1Points[18], status: 'repaired', defectType: 'none', ultrasonicResult: 'pass', paramAbnormal: undefined };
+wp1Points[27] = { ...wp1Points[27], status: 'repaired', defectType: 'none', ultrasonicResult: 'pass' };
+
+export const mockWeldPointsByWorkpiece: Record<string, WeldPoint[]> = {
+  'wp-001': wp1Points,
+  'wp-002': wp2Points,
+  'wp-003': wp3Points,
+};
+
+export const mockWeldPoints: WeldPoint[] = [...wp1Points, ...wp2Points, ...wp3Points];
 
 export const mockRepairRecords: RepairRecord[] = [
   {

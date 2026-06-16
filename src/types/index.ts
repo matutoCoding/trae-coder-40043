@@ -91,6 +91,7 @@ export interface WeldingProgram {
 export interface WeldPoint {
   id: string;
   index: number;
+  workpieceId: string;
   position: Position2D;
   status: WeldPointStatus;
   ultrasonicResult?: UltrasonicResult;
@@ -251,4 +252,41 @@ export interface DashboardDisposalStats {
   closed: number;
   total: number;
   avgCloseTimeMinutes: number;
+}
+
+export interface QualityByWorkpiece {
+  workpieceId: string;
+  workpieceCode: string;
+  totalPoints: number;
+  defectiveCount: number;
+  repairCount: number;
+  alarmCount: number;
+  passRate: number;
+  avgCloseTimeMinutes: number;
+}
+
+export interface QualityByDefect {
+  defectType: DefectType;
+  label: string;
+  count: number;
+  repairCount: number;
+  avgCloseTimeMinutes: number;
+  affectedWorkpieces: number;
+}
+
+export interface QualityByOperator {
+  operator: string;
+  repairCount: number;
+  closedCount: number;
+  avgCloseTimeMinutes: number;
+  role: '补焊工' | '质检员' | '工程师' | '系统';
+}
+
+export interface QualityBoardStats {
+  byWorkpiece: QualityByWorkpiece[];
+  byDefect: QualityByDefect[];
+  byOperator: QualityByOperator[];
+  totalRepairs: number;
+  overallPassRate: number;
+  overallAvgCloseMinutes: number;
 }

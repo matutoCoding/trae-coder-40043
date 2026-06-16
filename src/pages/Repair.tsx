@@ -1,9 +1,26 @@
 import { useState, useMemo } from 'react';
 import { useWeldingStore } from '@/store/weldingStore';
+import type { RepairReason, RepairMethod, ReinspectionResult } from '@/types';
 import {
   Wrench, CheckCircle2, AlertTriangle, Sparkles, User, Clock,
-  FileText, Brush, Link2, Bell, XCircle
+  FileText, Brush, Link2, Bell, XCircle, ClipboardList, ShieldCheck, Search
 } from 'lucide-react';
+
+const REPAIR_REASON_OPTIONS: { value: RepairReason; label: string }[] = [
+  { value: 'param_abnormal', label: '参数异常' },
+  { value: 'cold_weld', label: '虚焊' },
+  { value: 'missing_weld', label: '漏焊' },
+  { value: 'spatter', label: '焊渣飞溅' },
+  { value: 'ultrasonic_fail', label: '超声不合格' },
+  { value: 'other', label: '其他' },
+];
+
+const REPAIR_METHOD_OPTIONS: { value: RepairMethod; label: string }[] = [
+  { value: 'manual_spot', label: '手工点焊' },
+  { value: 'rework', label: '重焊' },
+  { value: 'replace', label: '更换工件' },
+  { value: 'grind_clean', label: '打磨清理' },
+];
 
 export default function RepairPage() {
   const {
@@ -17,6 +34,11 @@ export default function RepairPage() {
     description: '',
     spatterCleaned: false,
   });
+  const [selectedReason, setSelectedReason] = useState<RepairReason>('param_abnormal');
+  const [selectedMethod, setSelectedMethod] = useState<RepairMethod>('manual_spot');
+  const [reinspectionResult, setReinspectionResult] = useState<ReinspectionResult>('pass');
+  const [reinspectionOperator, setReinspectionOperator] = useState<string>('王质检员');
+  const [reinspectionNote, setReinspectionNote] = useState<string>('');
   const [showSuccess, setShowSuccess] = useState<string | null>(null);
 
   const defectivePoints = useMemo(
@@ -37,19 +59,29 @@ export default function RepairPage() {
   };
 
   const handleSubmit = () => {
-    if (!formData.weldPointId || !formData.operator || !formData.description) return;
+    if (!formData.weldPointId) return;
     const targetPoint = weldPoints.find(p => p.id === formData.weldPointId);
     submitRepair({
       weldPointId: formData.weldPointId,
       operator: formData.operator,
       description: formData.description,
       spatterCleaned: formData.spatterCleaned,
+      repairReason: selectedReason,
+      repairMethod: selectedMethod,
+      reinspectionResult,
+      reinspectionOperator,
+      reinspectionNote,
     });
     if (targetPoint) {
       setShowSuccess(`焊点 #${targetPoint.index} 补焊完成，已自动同步检测结果、解决关联告警并更新仪表盘`);
       setTimeout(() => setShowSuccess(null), 3500);
     }
     setFormData({ weldPointId: '', operator: '', description: '', spatterCleaned: false });
+    setSelectedReason('param_abnormal');
+    setSelectedMethod('manual_spot');
+    setReinspectionResult('pass');
+    setReinspectionOperator('王质检员');
+    setReinspectionNote('');
   };
 
   const relatedAlarmCount = useMemo(() =>
@@ -202,13 +234,149 @@ export default function RepairPage() {
               </span>
             </label>
 
+            <div className="border border-accent-cyan/30 rounded-lg bg-industrial-800/30 overflow-hidden">
+              <div className="px-3 py-2 border-b border-accent-cyan/30 bg-accent-cyan/5 flex items-center gap-2">
+                <ClipboardList className="w-4 h-4 text-accent-cyan" />
+                <h4 className="text-sm font-semibold text-accent-cyan">返修原因</h4>
+              </div>
+              <div className="p-3">
+                <select
+                  value={selectedReason}
+                  onChange={(e) => setSelectedReason(e.target.value as RepairReason)}
+                  className="w-full px-3 py-2.5 bg-industrial-900 border border-industrial-700 rounded text-white text-sm focus:outline-none focus:border-accent-cyan"
+                >
+                  {REPAIR_REASON_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="border border-accent-cyan/30 rounded-lg bg-industrial-800/30 overflow-hidden">
+              <div className="px-3 py-2 border-b border-accent-cyan/30 bg-accent-cyan/5 flex items-center gap-2">
+                <Wrench className="w-4 h-4 text-accent-cyan" />
+                <h4 className="text-sm font-semibold text-accent-cyan">处理方式</h4>
+              </div>
+              <div className="p-3">
+                <select
+                  value={selectedMethod}
+                  onChange={(e) => setSelectedMethod(e.target.value as RepairMethod)}
+                  className="w-full px-3 py-2.5 bg-industrial-900 border border-industrial-700 rounded text-white text-sm focus:outline-none focus:border-accent-cyan"
+                >
+                  {REPAIR_METHOD_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="border border-accent-cyan/30 rounded-lg bg-industrial-800/30 overflow-hidden">
+              <div className="px-3 py-2 border-b border-accent-cyan/30 bg-accent-cyan/5 flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-accent-cyan" />
+                <h4 className="text-sm font-semibold text-accent-cyan">复检结论</h4>
+              </div>
+              <div className="p-3">
+                <div className="grid grid-cols-3 gap-2">
+                  <label
+                    className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded cursor-pointer border transition-all ${
+                      reinspectionResult === 'pass'
+                        ? 'bg-accent-green/20 border-accent-green/60 text-accent-green'
+                        : 'bg-industrial-800 border-industrial-600 text-industrial-400 hover:border-industrial-500'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="reinspection"
+                      value="pass"
+                      checked={reinspectionResult === 'pass'}
+                      onChange={() => setReinspectionResult('pass')}
+                      className="sr-only"
+                    />
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span className="text-sm font-medium">合格</span>
+                  </label>
+                  <label
+                    className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded cursor-pointer border transition-all ${
+                      reinspectionResult === 'fail'
+                        ? 'bg-accent-red/20 border-accent-red/60 text-accent-red'
+                        : 'bg-industrial-800 border-industrial-600 text-industrial-400 hover:border-industrial-500'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="reinspection"
+                      value="fail"
+                      checked={reinspectionResult === 'fail'}
+                      onChange={() => setReinspectionResult('fail')}
+                      className="sr-only"
+                    />
+                    <XCircle className="w-4 h-4" />
+                    <span className="text-sm font-medium">不合格</span>
+                  </label>
+                  <label
+                    className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded cursor-pointer border transition-all ${
+                      reinspectionResult === 'pending'
+                        ? 'bg-industrial-600/40 border-industrial-500 text-industrial-200'
+                        : 'bg-industrial-800 border-industrial-600 text-industrial-400 hover:border-industrial-500'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="reinspection"
+                      value="pending"
+                      checked={reinspectionResult === 'pending'}
+                      onChange={() => setReinspectionResult('pending')}
+                      className="sr-only"
+                    />
+                    <Clock className="w-4 h-4" />
+                    <span className="text-sm font-medium">待检</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="border border-accent-cyan/30 rounded-lg bg-industrial-800/30 overflow-hidden">
+              <div className="px-3 py-2 border-b border-accent-cyan/30 bg-accent-cyan/5 flex items-center gap-2">
+                <Search className="w-4 h-4 text-accent-cyan" />
+                <h4 className="text-sm font-semibold text-accent-cyan">复检信息</h4>
+              </div>
+              <div className="p-3 space-y-3">
+                <div>
+                  <label className="block text-xs text-industrial-400 mb-1.5">复检员</label>
+                  <div className="relative">
+                    <User className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-industrial-500" />
+                    <input
+                      type="text"
+                      value={reinspectionOperator}
+                      onChange={(e) => setReinspectionOperator(e.target.value)}
+                      className="w-full pl-10 pr-3 py-2 bg-industrial-900 border border-industrial-700 rounded text-white text-sm focus:outline-none focus:border-accent-cyan"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-industrial-400 mb-1.5">复检备注</label>
+                  <textarea
+                    value={reinspectionNote}
+                    onChange={(e) => setReinspectionNote(e.target.value)}
+                    placeholder="填写复检观察、测量数据、异常说明等..."
+                    rows={2}
+                    className="w-full px-3 py-2 bg-industrial-900 border border-industrial-700 rounded text-white text-sm focus:outline-none focus:border-accent-cyan resize-none"
+                  />
+                </div>
+              </div>
+            </div>
+
             <button
               onClick={handleSubmit}
-              disabled={!formData.weldPointId || !formData.operator || !formData.description}
+              disabled={!formData.weldPointId}
               className="w-full btn-primary flex items-center justify-center gap-2 py-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <CheckCircle2 className="w-4 h-4" />
-              提交补焊记录（自动联动）
+              提交补焊
             </button>
 
             <div className="mt-3 space-y-1.5 p-3 rounded-lg bg-industrial-800/50 border border-industrial-700">
@@ -222,6 +390,7 @@ export default function RepairPage() {
                 <li>写入生产追溯时间线（补焊+复检）</li>
                 <li>自动解决所有关联告警记录</li>
                 <li>仪表盘合格率、异常点数实时重算</li>
+                <li>自动写入处置记录: report→assign→repair→reinspect→close 五阶段流转</li>
               </ul>
             </div>
           </div>

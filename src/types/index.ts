@@ -8,6 +8,10 @@ export type MaintenanceType = 'electrode_dressing' | 'preventive' | 'corrective'
 export type ProcessModule = 'loading' | 'fixture' | 'welding' | 'inspection' | 'repair' | 'cycle' | 'maintenance' | 'traceability';
 export type AlarmSeverity = 'info' | 'warning' | 'error' | 'high' | 'low';
 export type ProcessPhase = 'loading' | 'fixture' | 'welding' | 'inspection' | 'repair' | 'maintenance' | 'cycle' | 'quality';
+export type AlarmStatus = 'pending' | 'processing' | 'closed';
+export type RepairReason = 'param_abnormal' | 'cold_weld' | 'missing_weld' | 'spatter' | 'ultrasonic_fail' | 'other';
+export type RepairMethod = 'manual_spot' | 'rework' | 'replace' | 'grind_clean';
+export type ReinspectionResult = 'pass' | 'fail' | 'pending';
 
 export interface Position3D {
   x: number;
@@ -115,7 +119,28 @@ export interface RepairRecord {
   repairTime: Date;
   description: string;
   spatterCleaned: boolean;
-  repairMethod?: 'manual' | 'rework' | 'replace';
+  repairMethod?: RepairMethod;
+  repairReason?: RepairReason;
+  reinspectionResult?: ReinspectionResult;
+  reinspectionOperator?: string;
+  reinspectionTime?: Date;
+  reinspectionNote?: string;
+}
+
+export interface DisposalRecord {
+  id: string;
+  alarmId: string;
+  workpieceId: string;
+  weldPointIndex?: number;
+  phase: 'report' | 'assign' | 'repair' | 'reinspect' | 'close';
+  operator: string;
+  timestamp: Date;
+  status: AlarmStatus;
+  repairReason?: RepairReason;
+  repairMethod?: RepairMethod;
+  reinspectionResult?: ReinspectionResult;
+  note?: string;
+  relatedRecordId?: string;
 }
 
 export interface CycleData {
@@ -167,11 +192,15 @@ export interface AlarmRecord {
   paramValue?: number;
   paramMin?: number;
   paramMax?: number;
+  status: AlarmStatus;
   resolved: boolean;
   resolvedBy?: string;
   resolvedAt?: Date;
   resolution?: string;
   createdBy?: string;
+  assignedTo?: string;
+  assignedAt?: Date;
+  disposalRecordIds?: string[];
 }
 
 export interface TraceEvent {
@@ -189,4 +218,37 @@ export interface TraceEvent {
   status?: string;
   abnormal?: boolean;
   duration?: number;
+  relatedAlarmId?: string;
+  relatedDisposalIds?: string[];
+}
+
+export interface WorkpieceComparison {
+  workpieceA: {
+    id: string;
+    code: string;
+  };
+  workpieceB: {
+    id: string;
+    code: string;
+  };
+  metrics: {
+    totalCycle: { a: number; b: number; diff: number; diffPercent: number };
+    phaseBreakdown: {
+      phase: ProcessPhase;
+      a: number;
+      b: number;
+    }[];
+    abnormalPoints: { a: number; b: number; diff: number };
+    repairCount: { a: number; b: number; diff: number };
+    alarmCount: { a: number; b: number; diff: number };
+    passRate: { a: number; b: number; diff: number };
+  };
+}
+
+export interface DashboardDisposalStats {
+  pending: number;
+  processing: number;
+  closed: number;
+  total: number;
+  avgCloseTimeMinutes: number;
 }

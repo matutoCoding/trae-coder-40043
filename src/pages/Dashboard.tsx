@@ -2,11 +2,11 @@ import { useWeldingStore } from '@/store/weldingStore';
 import {
   Package, Clipboard, Bot, ScanLine, Wrench, Timer, Settings,
   TrendingUp, CheckCircle2, AlertTriangle, Activity, Clock,
-  History, XCircle, Bell, CheckCircle
+  History, XCircle, Bell
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, ReferenceLine } from 'recharts';
-import type { WeldPoint } from '@/types';
+import type { WeldPoint, AlarmStatus } from '@/types';
 
 interface ModuleCard {
   icon: React.ElementType;
@@ -41,9 +41,58 @@ function StatCard({ icon: Icon, label, value, unit, trend, color }: {
   );
 }
 
+function DisposalCard({ icon: Icon, label, value, total, color, bgColor }: {
+  icon: React.ElementType; label: string; value: number; total: number; color: string; bgColor: string;
+}) {
+  const percent = total > 0 ? Math.round((value / total) * 100) : 0;
+  const dashArray = (percent / 100) * 251.2;
+  return (
+    <div className="panel">
+      <div className="panel-body">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${bgColor}`}>
+                <Icon className={`w-4.5 h-4.5 ${color}`} />
+              </div>
+              <span className="data-label">{label}</span>
+            </div>
+            <div className="flex items-end gap-1">
+              <span className={`font-mono text-3xl font-bold ${color}`}>{value}</span>
+              <span className="text-industrial-400 text-sm mb-1">/ {total} 项</span>
+            </div>
+            <p className="text-xs text-industrial-400 mt-1">{percent}% 占比</p>
+          </div>
+          <div className="relative w-20 h-20 -rotate-90">
+            <svg viewBox="0 0 100 100" className="w-full h-full">
+              <circle cx="50" cy="50" r="40" stroke="#334155" strokeWidth="8" fill="none" />
+              <circle
+                cx="50" cy="50" r="40"
+                stroke={color === 'text-red-500' ? '#EF4444' : color === 'text-amber-500' ? '#F59E0B' : '#10B981'}
+                strokeWidth="8" fill="none"
+                strokeDasharray={`${dashArray} 251.2`}
+                strokeLinecap="round"
+              />
+            </svg>
+            <div className="absolute inset-0 flex items-center justify-center rotate-90">
+              <span className={`text-sm font-mono font-bold ${color}`}>{percent}%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const statusBadgeConfig: Record<AlarmStatus, { className: string; text: string }> = {
+  pending: { className: 'bg-orange-500/20 text-orange-300', text: '待处理' },
+  processing: { className: 'bg-amber-500/20 text-amber-300', text: '处理中' },
+  closed: { className: 'bg-emerald-500/20 text-emerald-300', text: '已关闭' },
+};
+
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { dashboardStats, cycleStats, weldPoints, fixture, currentWorkpiece, alarmRecords, isWelding } = useWeldingStore();
+  const { dashboardStats, cycleStats, weldPoints, fixture, currentWorkpiece, alarmRecords, isWelding, disposalStats, getAlarmsByWorkpiece } = useWeldingStore();
 
   const completedPoints = dashboardStats.completedPoints || 0;
   const defectivePoints = dashboardStats.defectivePoints || 0;
@@ -89,6 +138,50 @@ export default function Dashboard() {
         <StatCard icon={Activity} label="设备健康度" value={dashboardStats.equipmentHealth} unit="%" color="text-accent-orange" />
       </div>
 
+      <div className="panel">
+        <div className="panel-header">
+          <h3 className="text-white font-semibold flex items-center">
+            <Wrench className="w-4 h-4 mr-2 text-accent-cyan" />
+            告警处置
+          </h3>
+          <span className="text-xs text-industrial-400 flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5" />
+            平均闭环时间 <span className="text-accent-cyan font-mono font-semibold">{disposalStats.avgCloseTimeMinutes}</span> 分钟
+          </span>
+        </div>
+        <div className="panel-body">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <DisposalCard
+              icon={AlertTriangle}
+              label="待处理"
+              value={disposalStats.pending}
+              total={disposalStats.total}
+              color="text-red-500"
+              bgColor="bg-red-500/20"
+            />
+            <DisposalCard
+              icon={Wrench}
+              label="处理中"
+              value={disposalStats.processing}
+              total={disposalStats.total}
+              color="text-amber-500"
+              bgColor="bg-amber-500/20"
+            />
+            <DisposalCard
+              icon={CheckCircle2}
+              label="已关闭"
+              value={disposalStats.closed}
+              total={disposalStats.total}
+              color="text-emerald-500"
+              bgColor="bg-emerald-500/20"
+            />
+          </div>
+          <p className="text-center text-xs text-industrial-500 mt-3 pt-3 border-t border-industrial-700/50">
+            平均闭环时间 {disposalStats.avgCloseTimeMinutes} 分钟
+          </p>
+        </div>
+      </div>
+
       {activeAlarms.length > 0 && (
         <div className="panel border-accent-red/30">
           <div className="panel-header border-accent-red/30">
@@ -104,30 +197,45 @@ export default function Dashboard() {
           </div>
           <div className="panel-body">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {activeAlarms.slice(0, 6).map((alarm) => (
-                <div key={alarm.id} className={`rounded-lg p-3 border ${
-                  alarm.severity === 'high'
-                    ? 'bg-accent-red/10 border-accent-red/30'
-                    : 'bg-accent-yellow/10 border-accent-yellow/30'
-                }`}>
-                  <div className="flex items-start justify-between mb-1.5">
-                    <p className={`text-sm font-medium flex items-center gap-1.5 ${alarm.severity === 'high' ? 'text-accent-red' : 'text-accent-yellow'}`}>
-                      <AlertTriangle className="w-3.5 h-3.5" />
-                      {alarm.title}
-                    </p>
-                    {alarm.weldPointIndex && (
-                      <button onClick={() => navigate('/inspection')} className="text-[10px] px-1.5 py-0.5 bg-industrial-800 rounded hover:bg-industrial-700 text-industrial-300 font-mono">
-                        #{alarm.weldPointIndex} →
-                      </button>
+              {activeAlarms.slice(0, 6).map((alarm) => {
+                const isRedSeverity = alarm.severity === 'high' || alarm.severity === 'error';
+                const badgeConfig = statusBadgeConfig[alarm.status];
+                return (
+                  <div key={alarm.id} className={`rounded-lg p-3 border relative ${
+                    isRedSeverity
+                      ? 'bg-accent-red/10 border-accent-red/30'
+                      : 'bg-accent-yellow/10 border-accent-yellow/30'
+                  }`}>
+                    <div className="absolute top-2 right-2">
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-medium ${badgeConfig.className}`}>
+                        {badgeConfig.text}
+                      </span>
+                    </div>
+                    <div className="flex items-start justify-between mb-1.5 pr-16">
+                      <p className={`text-sm font-medium flex items-center gap-1.5 ${isRedSeverity ? 'text-accent-red' : 'text-accent-yellow'}`}>
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        {alarm.title}
+                      </p>
+                      {alarm.weldPointIndex && (
+                        <button onClick={() => navigate('/inspection')} className="text-[10px] px-1.5 py-0.5 bg-industrial-800 rounded hover:bg-industrial-700 text-industrial-300 font-mono shrink-0">
+                          #{alarm.weldPointIndex} →
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-xs text-industrial-400 mb-1.5">{alarm.description}</p>
+                    <div className="flex items-center justify-between text-[10px] text-industrial-500 mb-1">
+                      <span>{alarm.source === 'welding' ? '机器人焊接' : '焊点检测'}</span>
+                      <span className="font-mono">{alarm.createdBy}</span>
+                    </div>
+                    {alarm.assignedTo && (
+                      <div className="text-[10px] text-industrial-400 flex items-center gap-1 pt-1 border-t border-industrial-700/50">
+                        <Wrench className="w-3 h-3" />
+                        <span>分派: {alarm.assignedTo}</span>
+                      </div>
                     )}
                   </div>
-                  <p className="text-xs text-industrial-400 mb-1.5">{alarm.description}</p>
-                  <div className="flex items-center justify-between text-[10px] text-industrial-500">
-                    <span>{alarm.source === 'welding' ? '机器人焊接' : '焊点检测'}</span>
-                    <span className="font-mono">{alarm.createdBy}</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>

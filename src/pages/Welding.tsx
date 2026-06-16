@@ -1,27 +1,31 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useWeldingStore } from '@/store/weldingStore';
 import {
   Bot, Zap, Activity, Play, Square, Settings2, Timer, CircleDot,
-  Save, Plus, AlertTriangle, FileText, CheckCircle2
+  Save, AlertTriangle, FileText, CheckCircle2, Wrench, ShieldCheck,
+  Clock, UserRound, ArrowRight,
 } from 'lucide-react';
 import {
   ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  ReferenceLine, Legend, Scatter
+  ReferenceLine, Legend, Scatter,
 } from 'recharts';
-import type { WeldingParams, WeldingParamRanges } from '@/types';
+import type { WeldingParams, WeldingParamRanges, WeldPoint, AlarmRecord, AlarmStatus } from '@/types';
 
 export default function WeldingPage() {
+  const navigate = useNavigate();
   const {
     weldingPrograms, selectedProgram, setSelectedProgram,
     weldingParams, setWeldingParams, isWelding, setIsWelding,
-    weldingHistory, addWeldingHistoryPoint, weldPoints, updateWeldPoint,
+    weldingHistory, addWeldingHistoryPoint, weldPoints,
     saveProgramParams, currentWorkpiece, alarmRecords,
+    advanceWeldingProgress,
   } = useWeldingStore();
 
-  const [currentPointIndex, setCurrentPointIndex] = useState(() =>
-    weldPoints.findIndex(p => p.status === 'welding')
+  const [currentPointIndex, setCurrentPointIndex] = useState<number>(() =>
+    weldPoints.findIndex((p) => p.status === 'welding')
   );
-  const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  const [showSaveSuccess, setShowSaveSuccess] = useState<boolean>(false);
 
   const ranges: WeldingParamRanges = selectedProgram?.paramRanges || {
     current: { min: 10000, max: 14500 },
@@ -32,7 +36,7 @@ export default function WeldingPage() {
 
   useEffect(() => {
     if (!isWelding) return;
-    const interval = setInterval(() => {
+    const historyInterval = setInterval(() => {
       const ranges2 = selectedProgram?.paramRanges || ranges;
       let current = weldingParams.current + (Math.random() * 1500 - 750);
       let voltage = weldingParams.voltage + (Math.random() * 0.4 - 0.2);
@@ -48,43 +52,37 @@ export default function WeldingPage() {
         voltageNormal,
       });
     }, 800);
-    return () => clearInterval(interval);
+    return () => clearInterval(historyInterval);
   }, [isWelding, selectedProgram, weldingParams, weldingHistory.length, addWeldingHistoryPoint, ranges]);
 
   useEffect(() => {
     if (!isWelding) return;
-    const pointInterval = setInterval(() => {
-      setCurrentPointIndex((prev) => {
-        const next = prev + 1;
-        if (next < weldPoints.length) {
-          if (prev >= 0 && weldPoints[prev]) {
-            updateWeldPoint(weldPoints[prev].id, {
-              status: 'completed',
-              ultrasonicResult: Math.random() > 0.08 ? 'pass' : undefined,
-              defectType: 'none',
-              weldingEndTime: new Date(),
-            });
-          }
-          if (weldPoints[next]) {
-            updateWeldPoint(weldPoints[next].id, {
-              status: 'welding',
-              weldingStartTime: new Date(),
-            });
-          }
-          return next;
-        } else {
+    const progressInterval = setInterval(() => {
+      const nextId = advanceWeldingProgress();
+      if (!nextId) {
+        const hasPending = weldPoints.some((p) => p.status === 'pending');
+        if (!hasPending) {
           setIsWelding(false);
-          return prev;
         }
-      });
+      }
+      const weldingIdx = weldPoints.findIndex((p) => p.status === 'welding');
+      if (weldingIdx >= 0) {
+        setCurrentPointIndex(weldingIdx);
+      }
     }, 2000);
-    return () => clearInterval(pointInterval);
-  }, [isWelding, weldPoints, updateWeldPoint, setIsWelding]);
+    return () => clearInterval(progressInterval);
+  }, [isWelding, weldPoints, advanceWeldingProgress, setIsWelding]);
 
-  const completedCount = weldPoints.filter((p) => p.status === 'completed' || p.status === 'repaired').length;
+  const completedCount = useMemo(
+    () => weldPoints.filter((p) => p.status === 'completed' || p.status === 'repaired').length,
+    [weldPoints]
+  );
   const totalCount = weldPoints.length;
   const progress = Math.round((completedCount / totalCount) * 100);
-  const defectiveCount = weldPoints.filter(p => p.status === 'defective').length;
+  const defectiveCount = useMemo(
+    () => weldPoints.filter((p) => p.status === 'defective').length,
+    [weldPoints]
+  );
 
   const handleStartWelding = () => {
     if (!selectedProgram || !currentWorkpiece) return;
@@ -107,17 +105,71 @@ export default function WeldingPage() {
     time: weldingParams.time < ranges.time.min || weldingParams.time > ranges.time.max,
   };
 
-  const activeAlarms = alarmRecords.filter(a =>
-    !a.resolved &&
-    a.source === 'welding' &&
-    a.workpieceId === currentWorkpiece?.id
+  const activeAlarms = useMemo(
+    () => alarmRecords.filter(
+      (a) => !a.resolved && a.source === 'welding' && a.workpieceId === currentWorkpiece?.id
+    ),
+    [alarmRecords, currentWorkpiece]
   );
 
-  const chartData = weldingHistory.map((p) => ({
-    ...p,
-    abnormalCurrent: !p.currentNormal ? p.current : null,
-    abnormalVoltage: !p.voltageNormal ? p.voltage : null,
-  }));
+  const chartData = useMemo(
+    () => weldingHistory.map((p) => ({
+      ...p,
+      abnormalCurrent: !p.currentNormal ? p.current : null,
+      abnormalVoltage: !p.voltageNormal ? p.voltage : null,
+    })),
+    [weldingHistory]
+  );
+
+  const getStatusBadgeStyle = (status: AlarmStatus): { bg: string; text: string; label: string } => {
+    switch (status) {
+      case 'pending':
+        return { bg: 'bg-accent-orange/20 border-accent-orange/40', text: 'text-accent-orange', label: '待分派' };
+      case 'processing':
+        return { bg: 'bg-accent-yellow/20 border-accent-yellow/40', text: 'text-accent-yellow', label: '处理中' };
+      case 'closed':
+        return { bg: 'bg-accent-green/20 border-accent-green/40', text: 'text-accent-green', label: '已闭环' };
+    }
+  };
+
+  const getWeldPointTooltip = (p: WeldPoint): string => {
+    const lines: string[] = [`焊点#${p.index}`];
+    if (p.status === 'defective') {
+      const abnormalInfo = p.paramAbnormal
+        ? `${p.paramAbnormal.param}参数异常`
+        : p.defectType && p.defectType !== 'none'
+        ? `缺陷类型: ${p.defectType}`
+        : '';
+      lines.push(`待处理异常: ${abnormalInfo || '未知'}`);
+    } else {
+      const statusMap: Record<string, string> = {
+        pending: '待焊接',
+        welding: '焊接中',
+        completed: '已完成',
+        repaired: '补焊后合格',
+      };
+      lines.push(`状态: ${statusMap[p.status] || p.status}`);
+    }
+    if (p.paramAbnormal) {
+      lines.push(`参数: ${p.paramAbnormal.param} = ${p.paramAbnormal.value}`);
+    }
+    if (p.defectType && p.defectType !== 'none' && p.status !== 'defective') {
+      lines.push(`缺陷: ${p.defectType}`);
+    }
+    return lines.join('\n');
+  };
+
+  const handleAlarmClick = (alarm: AlarmRecord) => {
+    const targetIndex = alarm.weldPointIndex;
+    navigate('/inspection', {
+      state: targetIndex !== undefined ? { focusWeldPointIndex: targetIndex } : undefined,
+    });
+  };
+
+  const formatValue = (key: string, value: number): string => {
+    if (key === 'time') return value.toFixed(2);
+    return String(value);
+  };
 
   return (
     <div className="space-y-6">
@@ -210,40 +262,49 @@ export default function WeldingPage() {
               )}
             </div>
             <div className="panel-body space-y-5">
-              {[
+              {([
                 { key: 'current', label: '焊接电流', value: weldingParams.current, unit: 'A', min: ranges.current.min, max: ranges.current.max, step: 100, color: paramWarnings.current ? 'accent-yellow' : 'accent-cyan' },
                 { key: 'voltage', label: '焊接电压', value: weldingParams.voltage, unit: 'V', min: ranges.voltage.min, max: ranges.voltage.max, step: 0.1, color: paramWarnings.voltage ? 'accent-yellow' : 'accent-cyan' },
                 { key: 'pressure', label: '电极压力', value: weldingParams.pressure, unit: 'daN', min: ranges.pressure.min, max: ranges.pressure.max, step: 10, color: paramWarnings.pressure ? 'accent-yellow' : 'accent-cyan' },
                 { key: 'time', label: '焊接时间', value: weldingParams.time, unit: 's', min: ranges.time.min, max: ranges.time.max, step: 0.01, color: paramWarnings.time ? 'accent-yellow' : 'accent-cyan' },
-              ].map((item) => (
+              ] as const).map((item) => (
                 <div key={item.key}>
                   <div className="flex justify-between text-sm mb-1.5">
                     <span className="text-industrial-400 flex items-center gap-1.5">
                       {item.label}
-                      {(item.value as number) < (item.min as number) && <span className="text-accent-yellow text-xs">⚠低于下限</span>}
-                      {(item.value as number) > (item.max as number) && <span className="text-accent-yellow text-xs">⚠高于上限</span>}
+                      {item.value < item.min && <span className="text-accent-yellow text-xs">⚠低于下限</span>}
+                      {item.value > item.max && <span className="text-accent-yellow text-xs">⚠高于上限</span>}
                     </span>
                     <span className={`font-mono ${item.color === 'accent-yellow' ? 'text-accent-yellow' : 'text-accent-cyan'}`}>
-                      {typeof item.value === 'number' && (item as any).key === 'time'
-                        ? (item.value as number).toFixed(2)
-                        : item.value} {item.unit}
+                      {formatValue(item.key, item.value)} {item.unit}
                     </span>
                   </div>
                   <div className="relative">
                     <input
                       type="range"
-                      min={item.min} max={item.max} step={item.step}
-                      value={item.value as any}
+                      min={item.min}
+                      max={item.max}
+                      step={item.step}
+                      value={item.value}
                       onChange={(e) => setWeldingParams({ [item.key]: Number(e.target.value) } as Partial<WeldingParams>)}
-                      className={`w-full accent-cyan-500`}
+                      className="w-full accent-cyan-500"
                     />
                     <div className="flex justify-between text-[10px] text-industrial-500 mt-0.5">
-                      <span>最小 {(item.min as number)}{item.unit}</span>
-                      <span>最大 {(item.max as number)}{item.unit}</span>
+                      <span>最小 {item.min}{item.unit}</span>
+                      <span>最大 {item.max}{item.unit}</span>
                     </div>
                   </div>
                 </div>
               ))}
+              <div className="pt-2 border-t border-industrial-700">
+                <p className="text-[11px] text-industrial-500 flex items-start gap-1.5 leading-relaxed">
+                  <ShieldCheck className="w-3.5 h-3.5 text-accent-cyan flex-shrink-0 mt-0.5" />
+                  <span>
+                    <span className="text-accent-cyan">进度自动保护:</span>{' '}
+                    异常焊点保持待处理，即使后续焊点完成也不会被覆盖，须走补焊+复检闭环
+                  </span>
+                </p>
+              </div>
             </div>
           </div>
 
@@ -311,17 +372,38 @@ export default function WeldingPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={chartData} margin={{ top: 10, right: 40, left: 10, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="time" stroke="#64748B" fontSize={10}
-                    label={{ value: '采样时间 (s)', position: 'insideBottom', offset: -10, fill: '#64748B', fontSize: 11 }} />
-                  <YAxis yAxisId="left" stroke="#06B6D4" fontSize={10} domain={[9000, 15500]} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
-                    label={{ value: '电流(A)', angle: -90, position: 'insideLeft', fill: '#06B6D4', fontSize: 11 }} />
-                  <YAxis yAxisId="right" orientation="right" stroke="#F97316" fontSize={10} domain={[2.5, 6]} tickFormatter={(v) => v.toFixed(1)}
-                    label={{ value: '电压(V)', angle: 90, position: 'insideRight', fill: '#F97316', fontSize: 11 }} />
+                  <XAxis
+                    dataKey="time"
+                    stroke="#64748B"
+                    fontSize={10}
+                    label={{ value: '采样时间 (s)', position: 'insideBottom', offset: -10, fill: '#64748B', fontSize: 11 }}
+                  />
+                  <YAxis
+                    yAxisId="left"
+                    stroke="#06B6D4"
+                    fontSize={10}
+                    domain={[9000, 15500]}
+                    tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
+                    label={{ value: '电流(A)', angle: -90, position: 'insideLeft', fill: '#06B6D4', fontSize: 11 }}
+                  />
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    stroke="#F97316"
+                    fontSize={10}
+                    domain={[2.5, 6]}
+                    tickFormatter={(v) => v.toFixed(1)}
+                    label={{ value: '电压(V)', angle: 90, position: 'insideRight', fill: '#F97316', fontSize: 11 }}
+                  />
                   <Tooltip
                     contentStyle={{ backgroundColor: '#1E293B', border: '1px solid #334155', borderRadius: '6px' }}
                     labelStyle={{ color: '#E2E8F0' }}
-                    formatter={(value: any, name: string) => [
-                      value != null ? (name.includes('电流') || name === 'current' || name === 'abnormalCurrent' ? `${value} A` : `${value} V`) : null,
+                    formatter={(value: number | null, name: string) => [
+                      value != null
+                        ? name.includes('电流') || name === 'current' || name === 'abnormalCurrent'
+                          ? `${value} A`
+                          : `${value} V`
+                        : null,
                       name === 'current' ? '电流(A)' :
                       name === 'voltage' ? '电压(V)' :
                       name === 'abnormalCurrent' ? '异常电流' :
@@ -354,23 +436,33 @@ export default function WeldingPage() {
               <div className="panel-body">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {activeAlarms.slice(0, 4).map((alarm) => {
-                    const relatedPoint = weldPoints.find(p => p.index === alarm.weldPointIndex);
+                    const relatedPoint = weldPoints.find((p) => p.index === alarm.weldPointIndex);
+                    const badgeStyle = getStatusBadgeStyle(alarm.status);
                     return (
-                      <div key={alarm.id} className="bg-accent-red/10 border border-accent-red/30 rounded-lg p-3">
-                        <div className="flex items-start justify-between mb-1.5">
+                      <div
+                        key={alarm.id}
+                        onClick={() => handleAlarmClick(alarm)}
+                        className="bg-accent-red/10 border border-accent-red/30 rounded-lg p-3 cursor-pointer hover:bg-accent-red/15 hover:border-accent-red/50 transition-all group"
+                      >
+                        <div className="flex items-start justify-between mb-1.5 gap-2">
                           <p className="text-sm text-accent-red font-medium flex items-center gap-1.5">
-                            <AlertTriangle className="w-3.5 h-3.5" />
+                            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
                             {alarm.title}
                           </p>
-                          {alarm.weldPointIndex && (
-                            <span className="text-xs px-1.5 py-0.5 bg-accent-red/20 rounded font-mono text-accent-red">
-                              焊点 #{alarm.weldPointIndex}
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            {alarm.weldPointIndex && (
+                              <span className="text-xs px-1.5 py-0.5 bg-accent-red/20 rounded font-mono text-accent-red">
+                                #{alarm.weldPointIndex}
+                              </span>
+                            )}
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${badgeStyle.bg} ${badgeStyle.text}`}>
+                              {badgeStyle.label}
                             </span>
-                          )}
+                          </div>
                         </div>
-                        <p className="text-xs text-industrial-300">{alarm.description}</p>
+                        <p className="text-xs text-industrial-300 mb-2">{alarm.description}</p>
                         {alarm.paramName && (
-                          <div className="mt-2 flex items-center gap-3 text-xs font-mono">
+                          <div className="flex items-center gap-3 text-xs font-mono">
                             <span className="text-industrial-400">{alarm.paramName}:</span>
                             <span className="text-accent-red">
                               {alarm.paramValue?.toLocaleString()}
@@ -380,12 +472,29 @@ export default function WeldingPage() {
                             </span>
                           </div>
                         )}
-                        {relatedPoint && relatedPoint.status === 'defective' && (
-                          <p className="mt-2 text-xs text-accent-yellow flex items-center gap-1">
-                            <FileText className="w-3 h-3" />
-                            已自动进入「补焊修整」待处理队列
-                          </p>
-                        )}
+                        <div className="mt-2 flex items-center justify-between">
+                          <div className="flex items-center gap-3 text-[10px] text-industrial-500">
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {alarm.time.toLocaleTimeString()}
+                            </span>
+                            {alarm.assignedTo && (
+                              <span className="flex items-center gap-1">
+                                <UserRound className="w-3 h-3" />
+                                {alarm.assignedTo}
+                              </span>
+                            )}
+                          </div>
+                          {relatedPoint && relatedPoint.status === 'defective' && (
+                            <p className="text-xs text-accent-yellow flex items-center gap-1">
+                              <FileText className="w-3 h-3" />
+                              待补焊
+                            </p>
+                          )}
+                          <span className="text-[10px] text-accent-cyan opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                            去处理 <ArrowRight className="w-3 h-3" />
+                          </span>
+                        </div>
                       </div>
                     );
                   })}
@@ -425,30 +534,42 @@ export default function WeldingPage() {
               </div>
               <div className="grid grid-cols-12 gap-1.5">
                 {weldPoints.map((p, idx) => {
-                  const hasAlarm = alarmRecords.some(a =>
-                    a.weldPointIndex === p.index &&
-                    a.workpieceId === currentWorkpiece?.id
+                  const hasAlarm = alarmRecords.some(
+                    (a) => a.weldPointIndex === p.index && a.workpieceId === currentWorkpiece?.id
                   );
+                  const isDefective = p.status === 'defective';
+                  const isRepaired = p.status === 'repaired';
+                  const isWeldingStatus = p.status === 'welding';
+                  const isCompleted = p.status === 'completed';
                   return (
                     <div
                       key={p.id}
-                      className={`relative aspect-square rounded-md flex items-center justify-center text-xs font-mono cursor-pointer transition-all hover:scale-110 ${
-                        p.status === 'completed' ? 'bg-accent-green text-white' :
-                        p.status === 'repaired' ? 'bg-emerald-600 text-white' :
-                        p.status === 'defective' ? 'bg-accent-red text-white ring-2 ring-accent-red/60' :
-                        p.status === 'welding' ? 'bg-accent-cyan text-white animate-pulse ring-2 ring-accent-cyan/50 ring-offset-1 ring-offset-industrial-800' :
-                        'bg-industrial-700 text-industrial-400'
-                      }`}
-                      title={[
-                        `焊点#${p.index}`,
-                        `状态: ${p.status}`,
-                        p.paramAbnormal ? `参数异常: ${p.paramAbnormal.param} = ${p.paramAbnormal.value}` : '',
-                        p.defectType && p.defectType !== 'none' ? `缺陷: ${p.defectType}` : '',
-                        hasAlarm ? '有关联告警记录' : '',
-                      ].filter(Boolean).join('\n')}
+                      title={getWeldPointTooltip(p)}
+                      className={`relative aspect-square rounded-md flex items-center justify-center text-xs font-mono transition-all select-none ${
+                        isDefective
+                          ? 'bg-accent-red text-white ring-2 ring-accent-red/60'
+                          : isRepaired
+                          ? 'bg-emerald-600 text-white'
+                          : isWeldingStatus
+                          ? 'bg-accent-cyan text-white ring-2 ring-accent-cyan/50 ring-offset-1 ring-offset-industrial-800'
+                          : isCompleted
+                          ? 'bg-accent-green text-white'
+                          : 'bg-industrial-700 text-industrial-400'
+                      } ${isDefective ? '' : 'cursor-pointer hover:scale-110'}`}
                     >
-                      {idx + 1}
-                      {hasAlarm && (
+                      {isDefective ? (
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                      ) : isRepaired ? (
+                        <span className="flex items-center justify-center leading-none">
+                          <CheckCircle2 className="w-2.5 h-2.5 -mr-0.5" />
+                          <CheckCircle2 className="w-2.5 h-2.5" />
+                        </span>
+                      ) : isWeldingStatus ? (
+                        <Wrench className="w-3.5 h-3.5 animate-pulse" />
+                      ) : (
+                        <span>{idx + 1}</span>
+                      )}
+                      {hasAlarm && !isDefective && (
                         <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-accent-yellow rounded-full flex items-center justify-center ring-1 ring-industrial-800">
                           <span className="text-[8px] font-bold text-industrial-900">!</span>
                         </span>
@@ -459,11 +580,29 @@ export default function WeldingPage() {
               </div>
               <div className="flex flex-wrap justify-center gap-x-6 gap-y-2 mt-5 text-xs text-industrial-400">
                 <span className="flex items-center"><span className="w-3 h-3 rounded bg-accent-green mr-1.5" />已完成合格</span>
-                <span className="flex items-center"><span className="w-3 h-3 rounded bg-emerald-600 mr-1.5" />补焊后合格</span>
-                <span className="flex items-center"><span className="w-3 h-3 rounded bg-accent-cyan mr-1.5" />当前焊接</span>
-                <span className="flex items-center"><span className="w-3 h-3 rounded bg-accent-red mr-1.5" />异常待处理</span>
+                <span className="flex items-center">
+                  <span className="w-3 h-3 rounded bg-emerald-600 mr-1.5 flex items-center justify-center">
+                    <span className="text-[6px] text-white font-bold">✓✓</span>
+                  </span>
+                  补焊后合格
+                </span>
+                <span className="flex items-center">
+                  <span className="w-3 h-3 rounded bg-accent-cyan mr-1.5 flex items-center justify-center">
+                    <Wrench className="w-2 h-2 text-white" />
+                  </span>
+                  当前焊接
+                </span>
+                <span className="flex items-center">
+                  <span className="w-3 h-3 rounded bg-accent-red mr-1.5 flex items-center justify-center">
+                    <AlertTriangle className="w-2 h-2 text-white" />
+                  </span>
+                  异常待处理
+                </span>
                 <span className="flex items-center"><span className="w-3 h-3 rounded bg-industrial-700 mr-1.5" />待焊接</span>
-                <span className="flex items-center"><span className="w-3.5 h-3.5 rounded-full bg-accent-yellow mr-1.5 flex items-center justify-center text-industrial-900 text-[8px] font-bold justify-items-center">!</span>有关联告警</span>
+                <span className="flex items-center">
+                  <span className="w-3.5 h-3.5 rounded-full bg-accent-yellow mr-1.5 flex items-center justify-center text-industrial-900 text-[8px] font-bold">!</span>
+                  有关联告警
+                </span>
               </div>
             </div>
           </div>

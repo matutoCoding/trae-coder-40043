@@ -92,11 +92,11 @@ const statusBadgeConfig: Record<AlarmStatus, { className: string; text: string }
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { dashboardStats, cycleStats, weldPoints, fixture, currentWorkpiece, alarmRecords, isWelding, disposalStats, getAlarmsByWorkpiece } = useWeldingStore();
+  const { dashboardStats, cycleStats, currentWeldPoints, fixture, currentWorkpiece, currentAlarmRecords, isWelding, disposalStats } = useWeldingStore();
 
   const completedPoints = dashboardStats.completedPoints || 0;
   const defectivePoints = dashboardStats.defectivePoints || 0;
-  const weldingProgress = weldPoints.length > 0 ? Math.round((completedPoints / weldPoints.length) * 100) : 0;
+  const weldingProgress = currentWeldPoints.length > 0 ? Math.round((completedPoints / currentWeldPoints.length) * 100) : 0;
 
   const modules: ModuleCard[] = [
     { icon: Package, title: '工件上料', desc: currentWorkpiece?.status === 'loaded' ? '上料已完成' : (currentWorkpiece?.status === 'loading' ? '上料定位中' : '待上料'), path: '/loading', status: currentWorkpiece?.status === 'loaded' ? 'active' : (currentWorkpiece?.status === 'loading' ? 'active' : 'idle'), progress: currentWorkpiece?.status === 'loaded' ? 100 : currentWorkpiece?.status === 'loading' ? 65 : 0 },
@@ -115,7 +115,7 @@ export default function Dashboard() {
     warning: 'bg-accent-yellow',
   };
 
-  const activeAlarms = alarmRecords.filter(a => !a.resolved);
+  const activeAlarms = currentAlarmRecords.filter(a => !a.resolved);
   const weldingAlarms = activeAlarms.filter(a => a.source === 'welding');
   const inspectionAlarms = activeAlarms.filter(a => a.source === 'inspection');
 
@@ -293,7 +293,7 @@ export default function Dashboard() {
             <div className="space-y-2 text-sm">
               <div className="flex justify-between py-1 border-b border-industrial-700/50">
                 <span className="text-industrial-400">已完成焊点</span>
-                <span className="text-accent-green font-mono">{completedPoints} / {weldPoints.length}</span>
+                <span className="text-accent-green font-mono">{completedPoints} / {currentWeldPoints.length}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-industrial-700/50">
                 <span className="text-industrial-400">缺陷/异常焊点</span>
@@ -378,15 +378,14 @@ export default function Dashboard() {
               <ScanLine className="w-4 h-4 mr-2 text-accent-cyan" />
               焊点分布状态（全链路同步）
             </h3>
-            <span className="text-xs text-industrial-400">共{weldPoints.length}个焊点</span>
+            <span className="text-xs text-industrial-400">共{currentWeldPoints.length}个焊点</span>
           </div>
           <div className="panel-body">
             <div className="relative bg-industrial-900 rounded-lg p-4" style={{ minHeight: '180px' }}>
               <div className="grid grid-cols-10 gap-1.5">
-                {weldPoints.map((p) => {
-                  const hasAlarm = alarmRecords.some(a =>
+                {currentWeldPoints.map((p) => {
+                  const hasAlarm = currentAlarmRecords.some(a =>
                     a.weldPointIndex === p.index &&
-                    a.workpieceId === currentWorkpiece?.id &&
                     !a.resolved
                   );
                   return (

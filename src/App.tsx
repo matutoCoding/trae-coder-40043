@@ -7,6 +7,7 @@ import Welding from '@/pages/Welding';
 import Inspection from '@/pages/Inspection';
 import Repair from '@/pages/Repair';
 import Traceability from '@/pages/Traceability';
+import QualityBoard from '@/pages/QualityBoard';
 import Cycle from '@/pages/Cycle';
 import Maintenance from '@/pages/Maintenance';
 
@@ -22,6 +23,7 @@ export default function App() {
           <Route path="/inspection" element={<Inspection />} />
           <Route path="/repair" element={<Repair />} />
           <Route path="/traceability" element={<Traceability />} />
+          <Route path="/quality" element={<QualityBoard />} />
           <Route path="/cycle" element={<Cycle />} />
           <Route path="/maintenance" element={<Maintenance />} />
         </Route>

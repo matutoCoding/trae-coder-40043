@@ -1,7 +1,7 @@
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Package, Clipboard, Bot, ScanLine,
-  Wrench, Timer, Settings, Bell, User, ChevronRight, History
+  Wrench, Timer, Settings, Bell, User, ChevronRight, History, BarChart3
 } from 'lucide-react';
 import { useWeldingStore } from '@/store/weldingStore';
 import type { ProcessModule } from '@/types';
@@ -21,6 +21,7 @@ const navItems: NavItem[] = [
   { path: '/inspection', module: 'inspection', label: '焊点检测', icon: ScanLine },
   { path: '/repair', module: 'repair', label: '补焊修整', icon: Wrench },
   { path: '/traceability', module: 'traceability', label: '生产追溯', icon: History },
+  { path: '/quality', module: 'quality', label: '质量责任看板', icon: BarChart3 },
   { path: '/cycle', module: 'cycle', label: '节拍监控', icon: Timer },
   { path: '/maintenance', module: 'maintenance', label: '设备维护', icon: Settings },
 ];

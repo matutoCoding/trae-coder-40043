@@ -14,6 +14,14 @@ import {
   mockCycleStats, mockDashboardStats, mockDisposalRecords,
 } from '@/data/mockData';
 
+function calcAvgCloseMin(alarms: AlarmRecord[]): number {
+  const closed = alarms.filter(a => a.resolved && a.resolvedAt);
+  if (closed.length === 0) return 0;
+  const total = closed.reduce((s, a) =>
+    s + ((a.resolvedAt!.getTime() - a.time.getTime()) / 60000), 0);
+  return Number((total / closed.length).toFixed(1));
+}
+
 type WeldingState = {
   currentModule: ProcessModule;
   setCurrentModule: (module: ProcessModule) => void;
@@ -45,6 +53,7 @@ type WeldingState = {
   weldPoints: WeldPoint[];
   updateWeldPoint: (id: string, updates: Partial<WeldPoint>) => void;
   getWeldPointsByWorkpiece: (workpieceId: string) => WeldPoint[];
+  currentWeldPoints: WeldPoint[];
 
   repairRecords: RepairRecord[];
   submitRepair: (record: Partial<Omit<RepairRecord, 'id' | 'repairTime'>> &
@@ -54,8 +63,9 @@ type WeldingState = {
       reinspectionResult: ReinspectionResult;
       reinspectionOperator?: string;
       reinspectionNote?: string;
-    }) => void;
+    }) => ReinspectionResult | null;
   getRepairsByWorkpiece: (workpieceId: string) => RepairRecord[];
+  currentRepairRecords: RepairRecord[];
 
   markInspectionFail: (weldPointId: string, defectType: DefectType, inspector: string) => void;
   markInspectionPass: (weldPointId: string, inspector: string) => void;
@@ -78,6 +88,7 @@ type WeldingState = {
   assignAlarm: (alarmId: string, assignedTo: string) => void;
   getAlarmsByWorkpiece: (workpieceId: string) => AlarmRecord[];
   updateAlarmStatus: (alarmId: string, status: AlarmStatus, extra?: Partial<AlarmRecord>) => void;
+  currentAlarmRecords: AlarmRecord[];
 
   disposalRecords: DisposalRecord[];
   addDisposalRecord: (record: Omit<DisposalRecord, 'id' | 'timestamp'>) => DisposalRecord;
@@ -91,6 +102,7 @@ type WeldingState = {
   getTraceByWorkpiece: (workpieceId: string) => TraceEvent[];
 
   computeWorkpieceComparison: (workpieceIdA: string, workpieceIdB: string) => WorkpieceComparison | null;
+  computeQualityBoardStats: () => QualityBoardStats;
 
   dashboardStats: typeof mockDashboardStats;
   recomputeDashboardStats: () => void;
@@ -102,7 +114,14 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
 
   workpieces: mockWorkpieces,
   currentWorkpiece: mockWorkpieces[1],
-  setCurrentWorkpiece: (wp) => set({ currentWorkpiece: wp }),
+  setCurrentWorkpiece: (wp) => {
+    set({ currentWorkpiece: wp });
+    setTimeout(() => {
+      const s = get();
+      s.recomputeDashboardStats();
+      s.recomputeDisposalStats();
+    }, 0);
+  },
   addWorkpiece: (wp) => set((state) => ({ workpieces: [...state.workpieces, wp] })),
   updateWorkpieceStatus: (id, status) => set((state) => ({
     workpieces: state.workpieces.map((w) => w.id === id ? { ...w, status } : w),
@@ -178,17 +197,18 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
     if (point.voltage < ranges.voltage.min || point.voltage > ranges.voltage.max) abnormalParam = 'voltage';
 
     if (abnormalParam && state.currentWorkpiece && state.isWelding) {
-      const idx = state.weldPoints.findIndex(p => p.status === 'welding');
+      const currWp = state.currentWorkpiece.id;
+      const idx = state.weldPoints.findIndex(p => p.status === 'welding' && p.workpieceId === currWp);
       const wp = idx >= 0 ? state.weldPoints[idx] : null;
       const minV = abnormalParam === 'current' ? ranges.current.min : ranges.voltage.min;
       const maxV = abnormalParam === 'current' ? ranges.current.max : ranges.voltage.max;
       const actualV = abnormalParam === 'current' ? point.current : point.voltage;
       const paramLabel = abnormalParam === 'current' ? '电流' : '电压';
 
-      if (wp) {
+      if (wp && wp.workpieceId === currWp) {
         const existingAlarm = state.alarmRecords.find(a =>
           a.weldPointIndex === wp.index &&
-          a.workpieceId === state.currentWorkpiece!.id &&
+          a.workpieceId === currWp &&
           a.paramName === paramLabel &&
           !a.resolved
         );
@@ -200,7 +220,7 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
             time: now,
             severity: actualV < minV ? 'high' : 'warning',
             source: 'welding',
-            workpieceId: state.currentWorkpiece.id,
+            workpieceId: currWp,
             weldPointIndex: wp.index,
             title: `焊接${paramLabel}超范围`,
             description: `第${wp.index}号焊点焊接时${paramLabel}${actualV < minV ? '低于' : '高于'}正常范围${actualV < minV ? '下限' : '上限'}`,
@@ -216,7 +236,7 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
           const disposal: DisposalRecord = {
             id: `dr-${Date.now()}-r`,
             alarmId,
-            workpieceId: state.currentWorkpiece.id,
+            workpieceId: currWp,
             weldPointIndex: wp.index,
             phase: 'report',
             operator: '系统自动',
@@ -232,7 +252,7 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
           });
           get().addTraceEvent({
             phase: 'quality',
-            workpieceId: state.currentWorkpiece.id,
+            workpieceId: currWp,
             weldPointIndex: wp.index,
             title: `⚠ 第${wp.index}号焊点${paramLabel}异常`,
             description: newAlarm.description,
@@ -255,8 +275,9 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
   },
   advanceWeldingProgress: () => {
     let nextId: string | null = null;
+    const currWp = get().currentWorkpiece?.id;
     set((s) => {
-      const currentIdx = s.weldPoints.findIndex(p => p.status === 'welding');
+      const currentIdx = s.weldPoints.findIndex(p => p.status === 'welding' && (!currWp || p.workpieceId === currWp));
       const updatedPoints = s.weldPoints.map((p) => ({ ...p }));
       if (currentIdx >= 0) {
         const cp = updatedPoints[currentIdx];
@@ -269,7 +290,7 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
       }
       const startSearch = currentIdx >= 0 ? currentIdx + 1 : 0;
       for (let i = startSearch; i < updatedPoints.length; i++) {
-        if (updatedPoints[i].status === 'pending') {
+        if ((!currWp || updatedPoints[i].workpieceId === currWp) && updatedPoints[i].status === 'pending') {
           updatedPoints[i].status = 'welding';
           updatedPoints[i].weldingStartTime = new Date();
           nextId = updatedPoints[i].id;
@@ -286,13 +307,17 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
     weldPoints: state.weldPoints.map((p) => p.id === id ? { ...p, ...updates } : p),
   })),
   getWeldPointsByWorkpiece: (workpieceId) =>
-    get().weldPoints,
+    get().weldPoints.filter(p => p.workpieceId === workpieceId),
+  get currentWeldPoints() {
+    const s = get();
+    return s.currentWorkpiece ? s.weldPoints.filter(p => p.workpieceId === s.currentWorkpiece!.id) : s.weldPoints;
+  },
 
   repairRecords: mockRepairRecords,
   submitRepair: (recordInput) => {
     const state = get();
     const targetPoint = state.weldPoints.find(p => p.id === recordInput.weldPointId);
-    if (!targetPoint || !state.currentWorkpiece) return;
+    if (!targetPoint || !state.currentWorkpiece) return null;
     const workpieceId = recordInput.workpieceId || state.currentWorkpiece.id;
     const weldPointIndex = recordInput.weldPointIndex ?? targetPoint.index;
     const now = new Date();
@@ -318,9 +343,9 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
       a.workpieceId === record.workpieceId &&
       !a.resolved
     );
-
+    const dispIds: string[] = [];
     relatedAlarms.forEach(alarm => {
-      get().addDisposalRecord({
+      const d = get().addDisposalRecord({
         alarmId: alarm.id,
         workpieceId: record.workpieceId,
         weldPointIndex: record.weldPointIndex,
@@ -332,9 +357,13 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
         note: `补焊操作：${record.description}${record.spatterCleaned ? '；焊渣已清理' : ''}`,
         relatedRecordId: record.id,
       });
+      dispIds.push(d.id);
     });
 
     const isPass = recordInput.reinspectionResult === 'pass';
+    const isFail = recordInput.reinspectionResult === 'fail';
+    let latestReinspectDispId: string | undefined;
+
     if (isPass) {
       get().updateWeldPoint(record.weldPointId, {
         status: 'repaired',
@@ -345,7 +374,7 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
         inspectionTime: now,
       });
       relatedAlarms.forEach(alarm => {
-        const disp = get().addDisposalRecord({
+        const d1 = get().addDisposalRecord({
           alarmId: alarm.id,
           workpieceId: record.workpieceId,
           weldPointIndex: record.weldPointIndex,
@@ -356,7 +385,8 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
           note: recordInput.reinspectionNote || '复检合格',
           relatedRecordId: record.id,
         });
-        get().addDisposalRecord({
+        latestReinspectDispId = d1.id;
+        const d2 = get().addDisposalRecord({
           alarmId: alarm.id,
           workpieceId: record.workpieceId,
           weldPointIndex: record.weldPointIndex,
@@ -365,17 +395,18 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
           status: 'closed',
           reinspectionResult: 'pass',
           note: `处置闭环：补焊+复检均合格`,
-          relatedRecordId: disp.id,
+          relatedRecordId: d1.id,
         });
+        dispIds.push(d1.id, d2.id);
         get().resolveAlarm(alarm.id, record.operator, `补焊完成，复检合格: ${record.description}；复检结论：${recordInput.reinspectionNote || '合格'}`);
       });
     } else {
       get().updateWeldPoint(record.weldPointId, {
         status: 'defective',
-        ultrasonicResult: 'fail',
+        ultrasonicResult: isFail ? 'fail' : targetPoint.ultrasonicResult,
       });
       relatedAlarms.forEach(alarm => {
-        get().addDisposalRecord({
+        const d = get().addDisposalRecord({
           alarmId: alarm.id,
           workpieceId: record.workpieceId,
           weldPointIndex: record.weldPointIndex,
@@ -383,9 +414,11 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
           operator: recordInput.reinspectionOperator || record.operator,
           status: 'processing',
           reinspectionResult: recordInput.reinspectionResult,
-          note: recordInput.reinspectionNote || (recordInput.reinspectionResult === 'fail' ? '复检不合格，需二次补焊' : '待复检'),
+          note: recordInput.reinspectionNote || (isFail ? '复检不合格，需二次补焊' : '待复检'),
           relatedRecordId: record.id,
         });
+        latestReinspectDispId = d.id;
+        dispIds.push(d.id);
         get().assignAlarm(alarm.id, record.operator);
       });
     }
@@ -403,26 +436,34 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
         repairReason: record.repairReason,
         reinspectionResult: record.reinspectionResult,
       },
-      relatedDisposalIds: relatedAlarms.flatMap(a => a.disposalRecordIds || []),
-      status: isPass ? '合格' : '待复检',
+      relatedDisposalIds: [...dispIds, ...(relatedAlarms.flatMap(a => a.disposalRecordIds || []))],
+      relatedAlarmId: relatedAlarms[0]?.id,
+      status: isPass ? '合格' : (isFail ? '复检不合格' : '待复检'),
     });
     get().addTraceEvent({
       phase: 'inspection',
       operator: recordInput.reinspectionOperator || '系统自动',
       workpieceId: record.workpieceId,
       weldPointIndex: record.weldPointIndex,
-      title: `第${record.weldPointIndex}号焊点复检：${isPass ? '合格' : (recordInput.reinspectionResult === 'fail' ? '不合格' : '进行中')}`,
-      description: `补焊完成后${isPass ? '复检通过，焊点质量闭环' : (recordInput.reinspectionResult === 'fail' ? '复检不通过，仍在补焊队列' : '待完成复检')}`,
+      title: `第${record.weldPointIndex}号焊点复检：${isPass ? '合格' : (isFail ? '不合格' : '进行中')}`,
+      description: `补焊完成后${isPass ? '复检通过，焊点质量闭环' : (isFail ? '复检不通过，仍在补焊队列' : '待完成复检')}`,
       data: { result: recordInput.reinspectionResult, note: recordInput.reinspectionNote },
-      status: isPass ? '合格' : (recordInput.reinspectionResult === 'fail' ? '不合格' : '进行中'),
+      relatedAlarmId: relatedAlarms[0]?.id,
+      relatedDisposalIds: latestReinspectDispId ? [...dispIds, latestReinspectDispId] : dispIds,
+      status: isPass ? '合格' : (isFail ? '不合格' : '进行中'),
     });
 
     get().recomputeDashboardStats();
     get().recomputeDisposalStats();
     set((s) => ({ repairRecords: [...s.repairRecords, record] }));
+    return recordInput.reinspectionResult;
   },
   getRepairsByWorkpiece: (workpieceId) =>
     get().repairRecords.filter(r => r.workpieceId === workpieceId),
+  get currentRepairRecords() {
+    const s = get();
+    return s.currentWorkpiece ? s.repairRecords.filter(r => r.workpieceId === s.currentWorkpiece!.id) : s.repairRecords;
+  },
 
   markInspectionFail: (weldPointId, defectType, inspector) => {
     const state = get();
@@ -518,6 +559,7 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
       a.workpieceId === workpiece.id &&
       !a.resolved
     );
+    const dispIds: string[] = [];
     relatedAlarms.forEach(a => {
       const disp = get().addDisposalRecord({
         alarmId: a.id,
@@ -529,6 +571,7 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
         reinspectionResult: 'pass',
         note: `质检员直接标记合格，关闭告警`,
       });
+      dispIds.push(disp.id);
       get().resolveAlarm(a.id, inspector, `质检直接标记合格：${disp.note || ''}`);
     });
     get().addTraceEvent({
@@ -539,7 +582,8 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
       title: `第${wp.index}号焊点检测合格`,
       description: '超声波检测通过',
       data: { result: 'pass', closedAlarms: relatedAlarms.length },
-      relatedDisposalIds: relatedAlarms.flatMap(a => a.disposalRecordIds || []),
+      relatedDisposalIds: [...dispIds, ...relatedAlarms.flatMap(a => a.disposalRecordIds || [])],
+      relatedAlarmId: relatedAlarms[0]?.id,
       status: '合格',
     });
     get().recomputeDashboardStats();
@@ -671,6 +715,10 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
       a.id === alarmId ? { ...a, status, ...(extra || {}) } : a
     ),
   })),
+  get currentAlarmRecords() {
+    const s = get();
+    return s.currentWorkpiece ? s.alarmRecords.filter(a => a.workpieceId === s.currentWorkpiece!.id) : s.alarmRecords;
+  },
 
   disposalRecords: mockDisposalRecords,
   addDisposalRecord: (recordInput) => {
@@ -700,27 +748,21 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
       .filter(d => d.workpieceId === workpieceId)
       .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),
   disposalStats: {
-    pending: mockAlarmRecords.filter(a => a.status === 'pending').length,
-    processing: mockAlarmRecords.filter(a => a.status === 'processing').length,
-    closed: mockAlarmRecords.filter(a => a.status === 'closed').length,
-    total: mockAlarmRecords.length,
-    avgCloseTimeMinutes: 18.4,
+    pending: mockAlarmRecords.filter(a => a.status === 'pending' && a.workpieceId === mockWorkpieces[1].id).length,
+    processing: mockAlarmRecords.filter(a => a.status === 'processing' && a.workpieceId === mockWorkpieces[1].id).length,
+    closed: mockAlarmRecords.filter(a => a.status === 'closed' && a.workpieceId === mockWorkpieces[1].id).length,
+    total: mockAlarmRecords.filter(a => a.workpieceId === mockWorkpieces[1].id).length,
+    avgCloseTimeMinutes: calcAvgCloseMin(mockAlarmRecords.filter(a => a.workpieceId === mockWorkpieces[1].id)),
   },
   recomputeDisposalStats: () => set((state) => {
-    const records = state.alarmRecords;
+    const currId = state.currentWorkpiece?.id;
+    const records = currId ? state.alarmRecords.filter(a => a.workpieceId === currId) : state.alarmRecords;
     const pending = records.filter(r => r.status === 'pending').length;
     const processing = records.filter(r => r.status === 'processing').length;
     const closed = records.filter(r => r.status === 'closed' || r.resolved).length;
     const total = records.length;
-    const closedRecords = records.filter(r => r.resolved && r.resolvedAt);
-    let avg = 18.4;
-    if (closedRecords.length > 0) {
-      const totalMin = closedRecords.reduce((sum, r) =>
-        sum + ((r.resolvedAt!.getTime() - r.time.getTime()) / 60000), 0);
-      avg = Number((totalMin / closedRecords.length).toFixed(1));
-    }
     return {
-      disposalStats: { pending, processing, closed, total, avgCloseTimeMinutes: avg },
+      disposalStats: { pending, processing, closed, total, avgCloseTimeMinutes: calcAvgCloseMin(records) },
     };
   }),
 
@@ -746,6 +788,8 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
     const a = s.workpieces.find(w => w.id === aId);
     const b = s.workpieces.find(w => w.id === bId);
     if (!a || !b) return null;
+    const ptsA = s.getWeldPointsByWorkpiece(aId);
+    const ptsB = s.getWeldPointsByWorkpiece(bId);
     const cyclesA = s.getCyclesByWorkpiece(aId);
     const cyclesB = s.getCyclesByWorkpiece(bId);
     const cycleA = cyclesA[0];
@@ -759,17 +803,18 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
       a: cycleA ? (cycleA as any)[`${p}Time`] || 0 : 0,
       b: cycleB ? (cycleB as any)[`${p}Time`] || 0 : 0,
     }));
-    const wpA = s.weldPoints;
-    const abnA = wpA.filter(p => p.status === 'defective').length;
-    const abnB = Math.min(abnA + 2, 5);
+    const abnA = ptsA.filter(p => p.status === 'defective').length;
+    const abnB = ptsB.filter(p => p.status === 'defective').length;
     const repA = s.getRepairsByWorkpiece(aId).length;
-    const repB = s.getRepairsByWorkpiece(bId).length || 3;
+    const repB = s.getRepairsByWorkpiece(bId).length;
     const alA = s.getAlarmsByWorkpiece(aId).length;
-    const alB = s.getAlarmsByWorkpiece(bId).length || 4;
-    const inspectedA = wpA.filter(p => p.ultrasonicResult !== undefined).length;
-    const passA = wpA.filter(p => p.ultrasonicResult === 'pass').length;
-    const rateA = inspectedA > 0 ? Number(((passA / inspectedA) * 100).toFixed(1)) : 95;
-    const rateB = Number((rateA - 2.3).toFixed(1));
+    const alB = s.getAlarmsByWorkpiece(bId).length;
+    const inspA = ptsA.filter(p => p.ultrasonicResult !== undefined).length;
+    const passA = ptsA.filter(p => p.ultrasonicResult === 'pass').length;
+    const rateA = inspA > 0 ? Number(((passA / inspA) * 100).toFixed(1)) : 0;
+    const inspB = ptsB.filter(p => p.ultrasonicResult !== undefined).length;
+    const passB = ptsB.filter(p => p.ultrasonicResult === 'pass').length;
+    const rateB = inspB > 0 ? Number(((passB / inspB) * 100).toFixed(1)) : 0;
 
     return {
       workpieceA: { id: aId, code: a.code },
@@ -779,7 +824,7 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
           a: totalA,
           b: totalB,
           diff,
-          diffPercent: Number(((diff / totalA) * 100).toFixed(1)),
+          diffPercent: totalA > 0 ? Number(((diff / totalA) * 100).toFixed(1)) : 0,
         },
         phaseBreakdown,
         abnormalPoints: { a: abnA, b: abnB, diff: abnB - abnA },
@@ -790,11 +835,109 @@ export const useWeldingStore = create<WeldingState>((set, get) => ({
     };
   },
 
+  computeQualityBoardStats: () => {
+    const s = get();
+    const DEFECT_LABELS: Record<DefectType, string> = {
+      none: '无缺陷', cold: '虚焊', missing: '漏焊', spatter: '焊渣飞溅', param_abnormal: '参数异常',
+    };
+    const byWorkpiece = s.workpieces.map(wp => {
+      const pts = s.getWeldPointsByWorkpiece(wp.id);
+      const repairs = s.getRepairsByWorkpiece(wp.id);
+      const alarms = s.getAlarmsByWorkpiece(wp.id);
+      const defCount = pts.filter(p => p.status === 'defective' || p.defectType && p.defectType !== 'none').length;
+      const insp = pts.filter(p => p.ultrasonicResult !== undefined).length;
+      const pass = pts.filter(p => p.ultrasonicResult === 'pass').length;
+      return {
+        workpieceId: wp.id,
+        workpieceCode: wp.code,
+        totalPoints: pts.length,
+        defectiveCount: defCount,
+        repairCount: repairs.length,
+        alarmCount: alarms.length,
+        passRate: insp > 0 ? Number(((pass / insp) * 100).toFixed(1)) : 0,
+        avgCloseTimeMinutes: calcAvgCloseMin(alarms),
+      };
+    });
+
+    const allAlarms = s.alarmRecords;
+    const allDisposals = s.disposalRecords;
+    const byDefectRaw = new Map<DefectType, { count: number; repairCount: number; workpieces: Set<string>; closeMin: number[] }>();
+    allAlarms.forEach(al => {
+      const disposals = allDisposals.filter(d => d.alarmId === al.id);
+      const repairDisp = disposals.find(d => d.phase === 'repair');
+      const reportDisp = disposals.find(d => d.phase === 'report');
+      let dt: DefectType = 'none';
+      if (al.source === 'welding') dt = 'param_abnormal';
+      else if (reportDisp?.repairReason) {
+        dt = reportDisp.repairReason === 'cold_weld' ? 'cold'
+          : reportDisp.repairReason === 'missing_weld' ? 'missing'
+          : reportDisp.repairReason === 'spatter' ? 'spatter'
+          : reportDisp.repairReason === 'param_abnormal' ? 'param_abnormal' : 'none';
+      }
+      if (!byDefectRaw.has(dt)) {
+        byDefectRaw.set(dt, { count: 0, repairCount: 0, workpieces: new Set(), closeMin: [] });
+      }
+      const g = byDefectRaw.get(dt)!;
+      g.count++;
+      if (repairDisp) g.repairCount++;
+      if (al.workpieceId) g.workpieces.add(al.workpieceId);
+      if (al.resolved && al.resolvedAt) g.closeMin.push((al.resolvedAt.getTime() - al.time.getTime()) / 60000);
+    });
+    const byDefect = Array.from(byDefectRaw.entries()).map(([dt, v]) => ({
+      defectType: dt,
+      label: DEFECT_LABELS[dt] || String(dt),
+      count: v.count,
+      repairCount: v.repairCount,
+      avgCloseTimeMinutes: v.closeMin.length > 0 ? Number((v.closeMin.reduce((a, b) => a + b, 0) / v.closeMin.length).toFixed(1)) : 0,
+      affectedWorkpieces: v.workpieces.size,
+    }));
+
+    const byOperRaw = new Map<string, { repairCount: number; closedCount: number; closeMin: number[]; role: any }>();
+    allDisposals.forEach(d => {
+      if (d.phase === 'repair') {
+        if (!byOperRaw.has(d.operator)) byOperRaw.set(d.operator, { repairCount: 0, closedCount: 0, closeMin: [], role: '补焊工' });
+        byOperRaw.get(d.operator)!.repairCount++;
+      }
+    });
+    s.repairRecords.forEach(r => {
+      const closedAlarm = allAlarms.find(a =>
+        a.workpieceId === r.workpieceId && a.weldPointIndex === r.weldPointIndex && a.resolved);
+      if (closedAlarm && closedAlarm.resolvedAt) {
+        if (!byOperRaw.has(r.operator)) byOperRaw.set(r.operator, { repairCount: 0, closedCount: 0, closeMin: [], role: '补焊工' });
+        const o = byOperRaw.get(r.operator)!;
+        o.closedCount++;
+        o.closeMin.push((closedAlarm.resolvedAt!.getTime() - closedAlarm.time.getTime()) / 60000);
+      }
+    });
+    const byOperator = Array.from(byOperRaw.entries()).map(([op, v]) => ({
+      operator: op,
+      repairCount: v.repairCount,
+      closedCount: v.closedCount,
+      avgCloseTimeMinutes: v.closeMin.length > 0 ? Number((v.closeMin.reduce((a, b) => a + b, 0) / v.closeMin.length).toFixed(1)) : 0,
+      role: v.role,
+    }));
+
+    const totalRepairs = s.repairRecords.length;
+    const allWp = s.weldPoints.filter(p => p.ultrasonicResult !== undefined);
+    const allPass = allWp.filter(p => p.ultrasonicResult === 'pass');
+    const overallPassRate = allWp.length > 0 ? Number(((allPass.length / allWp.length) * 100).toFixed(1)) : 0;
+    return {
+      byWorkpiece,
+      byDefect,
+      byOperator,
+      totalRepairs,
+      overallPassRate,
+      overallAvgCloseMinutes: calcAvgCloseMin(allAlarms),
+    };
+  },
+
   dashboardStats: mockDashboardStats,
   recomputeDashboardStats: () => set((state) => {
-    const defective = state.weldPoints.filter(p => p.status === 'defective').length;
-    const completed = state.weldPoints.filter(p => p.status === 'completed' || p.status === 'repaired').length;
-    const inspected = state.weldPoints.filter(p => p.ultrasonicResult !== undefined);
+    const currId = state.currentWorkpiece?.id;
+    const pts = currId ? state.weldPoints.filter(p => p.workpieceId === currId) : state.weldPoints;
+    const defective = pts.filter(p => p.status === 'defective').length;
+    const completed = pts.filter(p => p.status === 'completed' || p.status === 'repaired').length;
+    const inspected = pts.filter(p => p.ultrasonicResult !== undefined);
     const passed = inspected.filter(p => p.ultrasonicResult === 'pass');
     const passRate = inspected.length > 0
       ? Number(((passed.length / inspected.length) * 100).toFixed(1))

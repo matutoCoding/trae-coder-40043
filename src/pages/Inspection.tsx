@@ -64,27 +64,27 @@ const getParamName = (param: 'current' | 'voltage' | 'pressure' | 'time'): strin
 
 export default function InspectionPage() {
   const {
-    weldPoints,
+    currentWeldPoints,
     markInspectionFail, markInspectionPass,
     currentWorkpiece, dashboardStats,
-    alarmRecords, disposalRecords, getDisposalsByAlarm,
+    currentAlarmRecords, disposalRecords, getDisposalsByAlarm,
   } = useWeldingStore();
 
   const [selectedPointId, setSelectedPointId] = useState<string | undefined>(() => {
-    const defaultFail = weldPoints.find(p => p.status === 'defective');
-    return (defaultFail || weldPoints.find(p => p.status === 'completed'))?.id;
+    const defaultFail = currentWeldPoints.find(p => p.status === 'defective');
+    return (defaultFail || currentWeldPoints.find(p => p.status === 'completed'))?.id;
   });
 
   const [disposalExpanded, setDisposalExpanded] = useState<Record<string, boolean>>({});
 
   const selectedPoint = useMemo(
-    () => weldPoints.find(p => p.id === selectedPointId) || null,
-    [selectedPointId, weldPoints]
+    () => currentWeldPoints.find(p => p.id === selectedPointId) || null,
+    [selectedPointId, currentWeldPoints]
   );
 
   const defectiveList = useMemo(
-    () => weldPoints.filter(p => p.status === 'defective'),
-    [weldPoints]
+    () => currentWeldPoints.filter(p => p.status === 'defective'),
+    [currentWeldPoints]
   );
 
   const ultrasonicData = useMemo(
@@ -92,9 +92,9 @@ export default function InspectionPage() {
     [selectedPoint?.id, selectedPoint?.ultrasonicResult, selectedPoint?.status]
   );
 
-  const completedPoints = weldPoints.filter((p) => p.status === 'completed' || p.status === 'repaired');
+  const completedPoints = currentWeldPoints.filter((p) => p.status === 'completed' || p.status === 'repaired');
   const passedPoints = completedPoints.filter((p) => p.ultrasonicResult === 'pass');
-  const failedPoints = weldPoints.filter((p) => p.ultrasonicResult === 'fail' || p.status === 'defective');
+  const failedPoints = currentWeldPoints.filter((p) => p.ultrasonicResult === 'fail' || p.status === 'defective');
   const inspectedPoints = completedPoints.filter((p) => p.ultrasonicResult !== undefined);
 
   const passRate = dashboardStats.passRate || '0';
@@ -119,20 +119,19 @@ export default function InspectionPage() {
   };
 
   const relatedAlarms = useMemo(() => {
-    if (!selectedPoint || !currentWorkpiece) return [];
-    return alarmRecords.filter(
-      a => a.weldPointIndex === selectedPoint.index && a.workpieceId === currentWorkpiece.id
+    if (!selectedPoint) return [];
+    return currentAlarmRecords.filter(
+      a => a.weldPointIndex === selectedPoint.index
     );
-  }, [selectedPoint, currentWorkpiece, alarmRecords]);
+  }, [selectedPoint, currentAlarmRecords]);
 
   const toggleDisposalExpanded = (alarmId: string) => {
     setDisposalExpanded(prev => ({ ...prev, [alarmId]: !prev[alarmId] }));
   };
 
-  const getPointAlarmStatus = (p: typeof weldPoints[number]): AlarmStatus => {
-    if (!currentWorkpiece) return 'pending';
-    const alarms = alarmRecords.filter(
-      a => a.weldPointIndex === p.index && a.workpieceId === currentWorkpiece.id
+  const getPointAlarmStatus = (p: typeof currentWeldPoints[number]): AlarmStatus => {
+    const alarms = currentAlarmRecords.filter(
+      a => a.weldPointIndex === p.index
     );
     if (alarms.length === 0) return 'pending';
     if (alarms.every(a => a.status === 'closed' || a.resolved)) return 'closed';
@@ -178,7 +177,7 @@ export default function InspectionPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="data-label">焊点总数</p>
-                <p className="text-3xl font-bold font-mono text-white mt-1">{weldPoints.length}</p>
+                <p className="text-3xl font-bold font-mono text-white mt-1">{currentWeldPoints.length}</p>
               </div>
               <FileCheck className="w-8 h-8 text-industrial-500" />
             </div>
@@ -231,9 +230,9 @@ export default function InspectionPage() {
           <div className="panel-body">
             <div className="bg-industrial-900 rounded-lg p-6 border border-industrial-700">
               <div className="grid grid-cols-12 gap-2">
-                {weldPoints.map((p) => {
-                  const hasAlarm = alarmRecords.some(a =>
-                    a.weldPointIndex === p.index && a.workpieceId === currentWorkpiece?.id
+                {currentWeldPoints.map((p) => {
+                  const hasAlarm = currentAlarmRecords.some(a =>
+                    a.weldPointIndex === p.index
                   );
                   const isSelected = selectedPoint?.id === p.id;
                   return (
@@ -561,8 +560,8 @@ export default function InspectionPage() {
             </thead>
             <tbody>
               {defectiveList.length > 0 ? defectiveList.map((p) => {
-                const alarm = alarmRecords.find(a =>
-                  a.weldPointIndex === p.index && a.workpieceId === currentWorkpiece?.id
+                const alarm = currentAlarmRecords.find(a =>
+                  a.weldPointIndex === p.index
                 );
                 const status = getPointAlarmStatus(p);
                 return (

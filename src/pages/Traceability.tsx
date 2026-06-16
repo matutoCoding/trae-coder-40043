@@ -5,7 +5,7 @@ import {
   AlertTriangle, CheckCircle, Users, Radio, Zap, Eye,
   Package, Clipboard, Bot, ScanLine, Wrench, Settings,
   ShieldCheck, Timer, History, ChevronRight, ArrowRight,
-  User, FileText, XCircle
+  User, FileText, XCircle, UserPlus, CheckCircle2
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -76,15 +76,47 @@ const disposalPhaseLabels: Record<DisposalRecord['phase'], string> = {
   assign: '分派',
   repair: '补焊',
   reinspect: '复检',
-  close: '闭环',
+  close: '关闭',
 };
 
 const disposalPhaseIcons: Record<DisposalRecord['phase'], React.ElementType> = {
-  report: Radio,
-  assign: Users,
+  report: AlertTriangle,
+  assign: UserPlus,
   repair: Wrench,
-  reinspect: ScanLine,
-  close: CheckCircle,
+  reinspect: ShieldCheck,
+  close: CheckCircle2,
+};
+
+const disposalPhaseColors: Record<DisposalRecord['phase'], string> = {
+  report: 'bg-orange-500 text-white border-orange-500/40',
+  assign: 'bg-yellow-500 text-slate-900 border-yellow-500/40',
+  repair: 'bg-cyan-400 text-slate-900 border-cyan-400/40',
+  reinspect: 'bg-blue-500 text-white border-blue-500/40',
+  close: 'bg-emerald-500 text-white border-emerald-500/40',
+};
+
+const disposalPhaseRing: Record<DisposalRecord['phase'], string> = {
+  report: 'ring-orange-500/20',
+  assign: 'ring-yellow-500/20',
+  repair: 'ring-cyan-400/20',
+  reinspect: 'ring-blue-500/20',
+  close: 'ring-emerald-500/20',
+};
+
+const disposalPhaseTextColors: Record<DisposalRecord['phase'], string> = {
+  report: 'text-orange-400',
+  assign: 'text-yellow-400',
+  repair: 'text-cyan-400',
+  reinspect: 'text-blue-400',
+  close: 'text-emerald-400',
+};
+
+const disposalPhaseLineColors: Record<DisposalRecord['phase'], string> = {
+  report: 'bg-orange-500/40',
+  assign: 'bg-yellow-500/40',
+  repair: 'bg-cyan-400/40',
+  reinspect: 'bg-blue-500/40',
+  close: 'bg-emerald-500/40',
 };
 
 const allPhases: ProcessPhase[] = [
@@ -216,66 +248,52 @@ type DisposalFlowProps = {
 };
 
 function DisposalFlow({ disposals }: DisposalFlowProps) {
-  const ordered: DisposalRecord['phase'][] = ['report', 'assign', 'repair', 'reinspect', 'close'];
-  const steps = ordered.map(phase => disposals.find(d => d.phase === phase));
+  const sorted = [...disposals].sort((a, b) =>
+    (a.timestamp?.getTime() || 0) - (b.timestamp?.getTime() || 0)
+  );
+
+  if (sorted.length === 0) return null;
 
   return (
     <div className="mt-3 pt-3 border-t border-slate-700/70 ml-2">
-      <div className="text-[10px] text-slate-500 mb-2 flex items-center gap-1">
+      <div className="text-[10px] text-slate-500 mb-3 flex items-center gap-1">
         <Eye className="w-3 h-3" />
-        处置流程
+        处置链时间轴
       </div>
-      <div className="flex items-start gap-1 overflow-x-auto pb-1">
-        {ordered.map((phase, idx) => {
-          const record = steps[idx];
-          const StepIcon = disposalPhaseIcons[phase];
-          const isDone = !!record;
-          const isLast = idx === ordered.length - 1;
-
+      <div className="relative pl-0.5 space-y-0.5">
+        {sorted.map((record, idx) => {
+          const isLast = idx === sorted.length - 1;
+          const StepIcon = disposalPhaseIcons[record.phase];
           return (
-            <div key={phase} className="flex items-start shrink-0">
+            <div key={record.id} className="relative flex gap-3 pb-4 last:pb-0">
+              {!isLast && (
+                <div className={`absolute left-[17px] top-9 w-0.5 h-full ${disposalPhaseLineColors[record.phase]}`} />
+              )}
               <div
-                className={`relative group flex flex-col items-center w-20 ${
-                  isDone ? 'opacity-100' : 'opacity-40'
-                }`}
+                className={`relative z-10 w-9 h-9 rounded-full flex items-center justify-center shrink-0 ring-4 ring-slate-900 border ${disposalPhaseColors[record.phase]} ${disposalPhaseRing[record.phase]}`}
               >
-                <div
-                  className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                    isDone
-                      ? 'bg-cyan-400/20 text-cyan-400 border border-cyan-400/40'
-                      : 'bg-slate-700 text-slate-500 border border-slate-600'
-                  }`}
-                >
-                  <StepIcon className="w-3.5 h-3.5" />
+                <StepIcon className="w-4 h-4" />
+              </div>
+              <div className="flex-1 pt-1">
+                <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                  <span className={`text-[11px] font-bold ${disposalPhaseTextColors[record.phase]}`}>
+                    {disposalPhaseLabels[record.phase]}
+                  </span>
+                  <span className="text-[10px] text-slate-300 flex items-center gap-1">
+                    <User className="w-2.5 h-2.5 text-slate-500" />
+                    {record.operator}
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-500 flex items-center gap-1">
+                    <Clock className="w-2.5 h-2.5" />
+                    {formatDateTime(record.timestamp)}
+                  </span>
                 </div>
-                <div className="mt-1.5 text-center">
-                  <div className={`text-[10px] font-medium ${isDone ? 'text-white' : 'text-slate-500'}`}>
-                    {disposalPhaseLabels[phase]}
-                  </div>
-                  {record && (
-                    <>
-                      <div className="text-[9px] text-slate-400 mt-0.5 leading-tight">
-                        {record.operator}
-                      </div>
-                      <div className="text-[9px] font-mono text-slate-500">
-                        {formatTime(record.timestamp)}
-                      </div>
-                    </>
-                  )}
-                </div>
-                {record?.note && (
-                  <div className="absolute top-full mt-1 left-1/2 -translate-x-1/2 z-30 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
-                    <div className="bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-[10px] text-slate-200 whitespace-nowrap shadow-xl">
-                      {record.note}
-                    </div>
+                {record.note && (
+                  <div className="text-[11px] text-slate-400 leading-relaxed pl-0.5">
+                    {record.note}
                   </div>
                 )}
               </div>
-              {!isLast && (
-                <div className="flex items-center shrink-0 h-8 mx-0.5">
-                  <ArrowRight className={`w-3 h-3 ${isDone ? 'text-cyan-400/60' : 'text-slate-600'}`} />
-                </div>
-              )}
             </div>
           );
         })}
@@ -284,27 +302,56 @@ function DisposalFlow({ disposals }: DisposalFlowProps) {
   );
 }
 
+function isNodeExpandable(event: TraceEvent, disposalRecordsAll: DisposalRecord[]): boolean {
+  const hasLink = !!event.relatedAlarmId || (!!event.relatedDisposalIds && event.relatedDisposalIds.length > 0);
+  if (!hasLink) return false;
+
+  if (event.phase === 'quality' && !!event.abnormal) return true;
+  if (event.phase === 'repair') return true;
+  if (event.phase === 'inspection') {
+    const hasReinspectKeyword =
+      (typeof event.title === 'string' && event.title.includes('复检')) ||
+      (typeof event.description === 'string' && event.description.includes('复检')) ||
+      (typeof event.status === 'string' && event.status.includes('复检'));
+    if (hasReinspectKeyword) return true;
+    if (event.relatedDisposalIds && event.relatedDisposalIds.length > 0) {
+      const ids = new Set(event.relatedDisposalIds);
+      const hasReinspectPhase = disposalRecordsAll.some(d => ids.has(d.id) && d.phase === 'reinspect');
+      if (hasReinspectPhase) return true;
+    }
+  }
+  return false;
+}
+
 type TimelineNodeProps = {
   event: TraceEvent;
   index: number;
   isLast: boolean;
   expanded: boolean;
   onToggle: () => void;
-  getDisposalsByAlarm: (id: string) => DisposalRecord[];
+  getDisposalsByEvent: (e: TraceEvent) => DisposalRecord[];
+  disposalRecordsAll: DisposalRecord[];
   side?: 'A' | 'B';
 };
 
 function TimelineNode({
-  event, index, isLast, expanded, onToggle, getDisposalsByAlarm, side = 'A'
+  event, index, isLast, expanded, onToggle, getDisposalsByEvent, disposalRecordsAll, side = 'A'
 }: TimelineNodeProps) {
   const Icon = phaseIcons[event.phase];
   const isAbnormal = !!event.abnormal;
-  const disposals = event.relatedAlarmId ? getDisposalsByAlarm(event.relatedAlarmId) : [];
+  const expandable = isNodeExpandable(event, disposalRecordsAll);
+  const disposals = expandable ? getDisposalsByEvent(event) : [];
 
   const sideAccentBorder = side === 'B'
     ? (isAbnormal ? 'border-fuchsia-400/30 hover:border-fuchsia-400/60' : 'border-slate-700 hover:border-slate-600')
     : (isAbnormal ? 'border-red-500/30 hover:border-red-500/60' : 'border-slate-700 hover:border-slate-600');
   const sideAccentBg = side === 'B' && !isAbnormal ? 'bg-slate-800/40' : 'bg-slate-800/60';
+
+  const handleClick = () => {
+    if (expandable || (event.detail && typeof event.detail === 'object' && Object.keys(event.detail).length > 0)) {
+      onToggle();
+    }
+  };
 
   return (
     <div className="relative flex gap-3 pb-5">
@@ -323,8 +370,12 @@ function TimelineNode({
       </div>
 
       <div
-        onClick={onToggle}
-        className={`flex-1 rounded-lg border p-3 cursor-pointer transition-all ${
+        onClick={handleClick}
+        className={`flex-1 rounded-lg border p-3 transition-all ${
+          expandable || (event.detail && typeof event.detail === 'object' && Object.keys(event.detail).length > 0)
+            ? 'cursor-pointer'
+            : 'cursor-default'
+        } ${
           expanded
             ? `${sideAccentBg} border-cyan-400/60`
             : `${sideAccentBg} ${sideAccentBorder}`
@@ -371,10 +422,10 @@ function TimelineNode({
               焊点 #{event.weldPointIndex}
             </span>
           )}
-          {disposals.length > 0 && (
+          {expandable && disposals.length > 0 && (
             <span className="flex items-center gap-1 text-cyan-400">
               <ChevronDown className={`w-2.5 h-2.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-              {disposals.length}步处置
+              展开处置链 ({disposals.length}步)
             </span>
           )}
         </div>
@@ -383,7 +434,7 @@ function TimelineNode({
           <DisposalFlow disposals={disposals} />
         )}
 
-        {expanded && event.detail && typeof event.detail === 'object' && Object.keys(event.detail).length > 0 && (
+        {expanded && !expandable && event.detail && typeof event.detail === 'object' && Object.keys(event.detail).length > 0 && (
           <div className="mt-3 pt-3 border-t border-slate-700/70 grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
             {Object.entries(event.detail as Record<string, unknown>).map(([k, v]) => (
               <div key={k} className="flex justify-between gap-2">
@@ -400,12 +451,13 @@ function TimelineNode({
 
 type TimelineProps = {
   events: TraceEvent[];
-  getDisposalsByAlarm: (id: string) => DisposalRecord[];
+  getDisposalsByEvent: (e: TraceEvent) => DisposalRecord[];
+  disposalRecordsAll: DisposalRecord[];
   side?: 'A' | 'B';
   scrollRef?: React.RefObject<HTMLDivElement | null>;
 };
 
-function Timeline({ events, getDisposalsByAlarm, side = 'A', scrollRef }: TimelineProps) {
+function Timeline({ events, getDisposalsByEvent, disposalRecordsAll, side = 'A', scrollRef }: TimelineProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   return (
@@ -423,7 +475,8 @@ function Timeline({ events, getDisposalsByAlarm, side = 'A', scrollRef }: Timeli
               isLast={idx === events.length - 1}
               expanded={expandedId === evt.id}
               onToggle={() => setExpandedId(expandedId === evt.id ? null : evt.id)}
-              getDisposalsByAlarm={getDisposalsByAlarm}
+              getDisposalsByEvent={getDisposalsByEvent}
+              disposalRecordsAll={disposalRecordsAll}
               side={side}
             />
           ))}
@@ -794,7 +847,7 @@ export default function TraceabilityPage() {
     workpieces, currentWorkpiece, traceEvents, alarmRecords, repairRecords,
     disposalRecords, weldPoints, cycleDataList, getTraceByWorkpiece,
     getAlarmsByWorkpiece, getRepairsByWorkpiece, getDisposalsByWorkpiece,
-    computeWorkpieceComparison
+    getWeldPointsByWorkpiece, getDisposalsByAlarm, computeWorkpieceComparison
   } = useWeldingStore();
 
   const [workpieceAId, setWorkpieceAId] = useState<string>(
@@ -853,20 +906,24 @@ export default function TraceabilityPage() {
   const disposalsA = useMemo(() => workpieceAId ? getDisposalsByWorkpiece(workpieceAId) : [], [workpieceAId, getDisposalsByWorkpiece, disposalRecords]);
 
   const weldPointsA = useMemo(() => {
-    if (!workpieceAId) return weldPoints;
-    const events = getTraceByWorkpiece(workpieceAId);
-    const indices = new Set<number>();
-    events.forEach(e => { if (e.weldPointIndex !== undefined) indices.add(e.weldPointIndex); });
-    if (indices.size === 0) return weldPoints;
-    return weldPoints.filter(p => indices.has(p.index));
-  }, [workpieceAId, getTraceByWorkpiece, traceEvents, weldPoints]);
+    if (!workpieceAId) return [] as WeldPoint[];
+    return getWeldPointsByWorkpiece(workpieceAId);
+  }, [workpieceAId, getWeldPointsByWorkpiece, weldPoints]);
 
-  const getDisposalsByAlarm = useMemo(() => {
-    return (alarmId: string): DisposalRecord[] =>
-      disposalRecords
-        .filter(d => d.alarmId === alarmId)
-        .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-  }, [disposalRecords]);
+  const getDisposalsByEvent = useMemo(() => {
+    return (event: TraceEvent): DisposalRecord[] => {
+      if (event.relatedAlarmId) {
+        return getDisposalsByAlarm(event.relatedAlarmId);
+      }
+      if (event.relatedDisposalIds && event.relatedDisposalIds.length > 0) {
+        const ids = new Set(event.relatedDisposalIds);
+        return disposalRecords
+          .filter(d => ids.has(d.id))
+          .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+      }
+      return [];
+    };
+  }, [getDisposalsByAlarm, disposalRecords]);
 
   const overviewStats = useMemo(() => {
     const totalSeconds = cycleA?.duration || 0;
@@ -1021,7 +1078,7 @@ export default function TraceabilityPage() {
                   </span>
                 </div>
                 <div className="p-4">
-                  <Timeline events={traceA} getDisposalsByAlarm={getDisposalsByAlarm} />
+                  <Timeline events={traceA} getDisposalsByEvent={getDisposalsByEvent} disposalRecordsAll={disposalRecords} />
                 </div>
               </div>
             </div>
@@ -1063,7 +1120,8 @@ export default function TraceabilityPage() {
                   <div className="p-4">
                     <Timeline
                       events={traceA}
-                      getDisposalsByAlarm={getDisposalsByAlarm}
+                      getDisposalsByEvent={getDisposalsByEvent}
+                      disposalRecordsAll={disposalRecords}
                       side="A"
                       scrollRef={scrollLeftRef}
                     />
@@ -1080,7 +1138,8 @@ export default function TraceabilityPage() {
                   <div className="p-4">
                     <Timeline
                       events={traceB}
-                      getDisposalsByAlarm={getDisposalsByAlarm}
+                      getDisposalsByEvent={getDisposalsByEvent}
+                      disposalRecordsAll={disposalRecords}
                       side="B"
                       scrollRef={scrollRightRef}
                     />

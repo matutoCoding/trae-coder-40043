@@ -24,8 +24,8 @@ const REPAIR_METHOD_OPTIONS: { value: RepairMethod; label: string }[] = [
 
 export default function RepairPage() {
   const {
-    weldPoints, repairRecords, submitRepair,
-    currentWorkpiece, alarmRecords, dashboardStats,
+    currentWeldPoints, currentRepairRecords, submitRepair,
+    currentWorkpiece, currentAlarmRecords, dashboardStats,
   } = useWeldingStore();
 
   const [formData, setFormData] = useState({
@@ -42,12 +42,12 @@ export default function RepairPage() {
   const [showSuccess, setShowSuccess] = useState<string | null>(null);
 
   const defectivePoints = useMemo(
-    () => weldPoints.filter((p) => p.status === 'defective'),
-    [weldPoints]
+    () => currentWeldPoints.filter((p) => p.status === 'defective'),
+    [currentWeldPoints]
   );
   const repairedPoints = useMemo(
-    () => weldPoints.filter((p) => p.status === 'repaired'),
-    [weldPoints]
+    () => currentWeldPoints.filter((p) => p.status === 'repaired'),
+    [currentWeldPoints]
   );
 
   const defectLabels: Record<string, string> = {
@@ -60,8 +60,9 @@ export default function RepairPage() {
 
   const handleSubmit = () => {
     if (!formData.weldPointId) return;
-    const targetPoint = weldPoints.find(p => p.id === formData.weldPointId);
-    submitRepair({
+    const targetPoint = currentWeldPoints.find(p => p.id === formData.weldPointId);
+    const idx = targetPoint?.index;
+    const result = submitRepair({
       weldPointId: formData.weldPointId,
       operator: formData.operator,
       description: formData.description,
@@ -72,8 +73,14 @@ export default function RepairPage() {
       reinspectionOperator,
       reinspectionNote,
     });
-    if (targetPoint) {
-      setShowSuccess(`焊点 #${targetPoint.index} 补焊完成，已自动同步检测结果、解决关联告警并更新仪表盘`);
+    if (idx !== undefined) {
+      if (result === 'pass') {
+        setShowSuccess(`焊点 #${idx} 补焊完成，复检合格，处置已闭环，告警已解决`);
+      } else if (result === 'fail') {
+        setShowSuccess(`焊点 #${idx} 补焊完成，复检不合格，仍在待补焊队列中，未闭环`);
+      } else if (result === 'pending') {
+        setShowSuccess(`焊点 #${idx} 补焊完成，待复检中，处置链继续跟进，告警保持处理中`);
+      }
       setTimeout(() => setShowSuccess(null), 3500);
     }
     setFormData({ weldPointId: '', operator: '', description: '', spatterCleaned: false });
@@ -85,12 +92,11 @@ export default function RepairPage() {
   };
 
   const relatedAlarmCount = useMemo(() =>
-    alarmRecords.filter(a =>
-      a.workpieceId === currentWorkpiece?.id &&
+    currentAlarmRecords.filter(a =>
       !a.resolved &&
-      weldPoints.some(p => p.id === formData.weldPointId && p.index === a.weldPointIndex)
+      currentWeldPoints.some(p => p.id === formData.weldPointId && p.index === a.weldPointIndex)
     ).length,
-  [alarmRecords, currentWorkpiece?.id, weldPoints, formData.weldPointId]);
+  [currentAlarmRecords, currentWeldPoints, formData.weldPointId]);
 
   return (
     <div className="space-y-6">
@@ -141,7 +147,7 @@ export default function RepairPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="data-label">补焊记录总数</p>
-                <p className="text-3xl font-bold font-mono text-accent-cyan mt-1">{repairRecords.length}</p>
+                <p className="text-3xl font-bold font-mono text-accent-cyan mt-1">{currentRepairRecords.length}</p>
               </div>
               <FileText className="w-8 h-8 text-accent-cyan/50" />
             </div>
@@ -407,9 +413,9 @@ export default function RepairPage() {
           <div className="panel-body">
             <div className="bg-industrial-900 rounded-lg p-6 border border-industrial-700 mb-6">
               <div className="grid grid-cols-10 gap-2">
-                {weldPoints.map((p) => {
-                  const hasAlarm = alarmRecords.some(a =>
-                    a.weldPointIndex === p.index && a.workpieceId === currentWorkpiece?.id
+                {currentWeldPoints.map((p) => {
+                  const hasAlarm = currentAlarmRecords.some(a =>
+                    a.weldPointIndex === p.index
                   );
                   return (
                     <div
@@ -455,8 +461,8 @@ export default function RepairPage() {
               {defectivePoints.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {defectivePoints.map((p) => {
-                    const alarms = alarmRecords.filter(a =>
-                      a.weldPointIndex === p.index && a.workpieceId === currentWorkpiece?.id
+                    const alarms = currentAlarmRecords.filter(a =>
+                      a.weldPointIndex === p.index
                     );
                     const defectType = p.defectType && p.defectType !== 'none'
                       ? defectLabels[p.defectType as keyof typeof defectLabels]
@@ -538,31 +544,52 @@ export default function RepairPage() {
               </tr>
             </thead>
             <tbody>
-              {repairRecords.map((r) => (
-                <tr key={r.id} className="border-b border-industrial-800 hover:bg-industrial-800/50 text-sm">
-                  <td className="px-4 py-3 font-mono text-accent-cyan text-xs">{r.id}</td>
-                  <td className="px-4 py-3 text-industrial-300 font-mono text-xs">{r.workpieceId}</td>
-                  <td className="px-4 py-3 text-white font-mono font-semibold">#{r.weldPointIndex}</td>
-                  <td className="px-4 py-3 text-industrial-300">{r.operator}</td>
-                  <td className="px-4 py-3 text-industrial-300 font-mono text-xs">
-                    <span className="flex items-center gap-1"><Clock className="w-3 h-3" />
-                      {typeof r.repairTime === 'string' ? r.repairTime : (r.repairTime as unknown as Date).toLocaleString?.()}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-industrial-300 max-w-xs truncate">{r.description}</td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center text-xs ${r.spatterCleaned ? 'text-accent-green' : 'text-accent-yellow'}`}>
-                      {r.spatterCleaned ? <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> : <AlertTriangle className="w-3.5 h-3.5 mr-1" />}
-                      {r.spatterCleaned ? '已清理' : '待清理'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
+              {currentRepairRecords.map((r) => {
+                const res = r.reinspectionResult;
+                let statusBadge: React.ReactNode;
+                if (!res || res === 'pass') {
+                  statusBadge = (
                     <span className="inline-flex items-center text-xs px-2 py-0.5 rounded bg-emerald-600/20 text-emerald-400">
-                      <CheckCircle2 className="w-3 h-3 mr-1" /> 已完成（自动复检合格）
+                      <CheckCircle2 className="w-3 h-3 mr-1" /> 已闭环（复检合格）
                     </span>
-                  </td>
-                </tr>
-              ))}
+                  );
+                } else if (res === 'fail') {
+                  statusBadge = (
+                    <span className="inline-flex items-center text-xs px-2 py-0.5 rounded bg-red-600/20 text-red-400">
+                      <XCircle className="w-3 h-3 mr-1" /> 未闭环（复检不合格）
+                    </span>
+                  );
+                } else {
+                  statusBadge = (
+                    <span className="inline-flex items-center text-xs px-2 py-0.5 rounded bg-industrial-600/40 text-industrial-300">
+                      <Clock className="w-3 h-3 mr-1" /> 待复检（未闭环）
+                    </span>
+                  );
+                }
+                return (
+                  <tr key={r.id} className="border-b border-industrial-800 hover:bg-industrial-800/50 text-sm">
+                    <td className="px-4 py-3 font-mono text-accent-cyan text-xs">{r.id}</td>
+                    <td className="px-4 py-3 text-industrial-300 font-mono text-xs">{r.workpieceId}</td>
+                    <td className="px-4 py-3 text-white font-mono font-semibold">#{r.weldPointIndex}</td>
+                    <td className="px-4 py-3 text-industrial-300">{r.operator}</td>
+                    <td className="px-4 py-3 text-industrial-300 font-mono text-xs">
+                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" />
+                        {typeof r.repairTime === 'string' ? r.repairTime : (r.repairTime as unknown as Date).toLocaleString?.()}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-industrial-300 max-w-xs truncate">{r.description}</td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center text-xs ${r.spatterCleaned ? 'text-accent-green' : 'text-accent-yellow'}`}>
+                        {r.spatterCleaned ? <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> : <AlertTriangle className="w-3.5 h-3.5 mr-1" />}
+                        {r.spatterCleaned ? '已清理' : '待清理'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {statusBadge}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

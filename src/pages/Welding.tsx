@@ -17,13 +17,13 @@ export default function WeldingPage() {
   const {
     weldingPrograms, selectedProgram, setSelectedProgram,
     weldingParams, setWeldingParams, isWelding, setIsWelding,
-    weldingHistory, addWeldingHistoryPoint, weldPoints,
-    saveProgramParams, currentWorkpiece, alarmRecords,
+    weldingHistory, addWeldingHistoryPoint, currentWeldPoints,
+    saveProgramParams, currentWorkpiece, currentAlarmRecords,
     advanceWeldingProgress,
   } = useWeldingStore();
 
   const [currentPointIndex, setCurrentPointIndex] = useState<number>(() =>
-    weldPoints.findIndex((p) => p.status === 'welding')
+    currentWeldPoints.findIndex((p) => p.status === 'welding')
   );
   const [showSaveSuccess, setShowSaveSuccess] = useState<boolean>(false);
 
@@ -60,28 +60,28 @@ export default function WeldingPage() {
     const progressInterval = setInterval(() => {
       const nextId = advanceWeldingProgress();
       if (!nextId) {
-        const hasPending = weldPoints.some((p) => p.status === 'pending');
+        const hasPending = currentWeldPoints.some((p) => p.status === 'pending');
         if (!hasPending) {
           setIsWelding(false);
         }
       }
-      const weldingIdx = weldPoints.findIndex((p) => p.status === 'welding');
+      const weldingIdx = currentWeldPoints.findIndex((p) => p.status === 'welding');
       if (weldingIdx >= 0) {
         setCurrentPointIndex(weldingIdx);
       }
     }, 2000);
     return () => clearInterval(progressInterval);
-  }, [isWelding, weldPoints, advanceWeldingProgress, setIsWelding]);
+  }, [isWelding, currentWeldPoints, advanceWeldingProgress, setIsWelding]);
 
   const completedCount = useMemo(
-    () => weldPoints.filter((p) => p.status === 'completed' || p.status === 'repaired').length,
-    [weldPoints]
+    () => currentWeldPoints.filter((p) => p.status === 'completed' || p.status === 'repaired').length,
+    [currentWeldPoints]
   );
-  const totalCount = weldPoints.length;
+  const totalCount = currentWeldPoints.length;
   const progress = Math.round((completedCount / totalCount) * 100);
   const defectiveCount = useMemo(
-    () => weldPoints.filter((p) => p.status === 'defective').length,
-    [weldPoints]
+    () => currentWeldPoints.filter((p) => p.status === 'defective').length,
+    [currentWeldPoints]
   );
 
   const handleStartWelding = () => {
@@ -106,10 +106,10 @@ export default function WeldingPage() {
   };
 
   const activeAlarms = useMemo(
-    () => alarmRecords.filter(
-      (a) => !a.resolved && a.source === 'welding' && a.workpieceId === currentWorkpiece?.id
+    () => currentAlarmRecords.filter(
+      (a) => !a.resolved && a.source === 'welding'
     ),
-    [alarmRecords, currentWorkpiece]
+    [currentAlarmRecords]
   );
 
   const chartData = useMemo(
@@ -436,7 +436,7 @@ export default function WeldingPage() {
               <div className="panel-body">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {activeAlarms.slice(0, 4).map((alarm) => {
-                    const relatedPoint = weldPoints.find((p) => p.index === alarm.weldPointIndex);
+                    const relatedPoint = currentWeldPoints.find((p) => p.index === alarm.weldPointIndex);
                     const badgeStyle = getStatusBadgeStyle(alarm.status);
                     return (
                       <div
@@ -533,9 +533,9 @@ export default function WeldingPage() {
                 />
               </div>
               <div className="grid grid-cols-12 gap-1.5">
-                {weldPoints.map((p, idx) => {
-                  const hasAlarm = alarmRecords.some(
-                    (a) => a.weldPointIndex === p.index && a.workpieceId === currentWorkpiece?.id
+                {currentWeldPoints.map((p, idx) => {
+                  const hasAlarm = currentAlarmRecords.some(
+                    (a) => a.weldPointIndex === p.index
                   );
                   const isDefective = p.status === 'defective';
                   const isRepaired = p.status === 'repaired';
